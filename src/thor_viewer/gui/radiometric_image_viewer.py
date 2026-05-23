@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import cv2
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt
 from PySide6.QtGui import QImage, QMouseEvent, QPixmap
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from thor_viewer.backend.radiometric_jpeg import load_radiometric_jpeg
 
@@ -18,6 +18,9 @@ class RadiometricImageViewer(QWidget):
         self.preview_width = 640
         self.preview_height = 480
 
+        self.open_button = QPushButton("Open IR image")
+        self.open_button.clicked.connect(self.browse_file)
+
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMouseTracking(True)
@@ -27,9 +30,23 @@ class RadiometricImageViewer(QWidget):
         self.info_label.setAlignment(Qt.AlignLeft)
 
         layout = QVBoxLayout()
+        layout.addWidget(self.open_button)
         layout.addWidget(self.image_label)
         layout.addWidget(self.info_label)
         self.setLayout(layout)
+
+    def browse_file(self) -> None:
+        filename, _ = QFileDialog.getOpenFileName(
+            self,
+            "Open radiometric IR image",
+            "",
+            "Images (*.jpg *.jpeg);;All files (*)",
+        )
+
+        if not filename:
+            return
+
+        self.open_file(Path(filename))
 
     def open_file(self, path: Path) -> None:
         self.image = load_radiometric_jpeg(path)
