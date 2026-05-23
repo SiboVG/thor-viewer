@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QPointF, QSize, Qt
 from PySide6.QtGui import QImage, QMouseEvent, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -47,6 +47,10 @@ class RadiometricImageViewer(QWidget):
         self.display_image: QImage | None = None
         self.zoom_factor = 1.0
         self.fit_to_view = True
+        self.is_panning = False
+        self.pan_start_position = QPointF()
+        self.pan_start_h_value = 0
+        self.pan_start_v_value = 0
 
         self.open_button = QPushButton("Open image")
         self.open_button.clicked.connect(self.browse_file)
@@ -92,13 +96,17 @@ class RadiometricImageViewer(QWidget):
         self.image_label.setMinimumSize(1, 1)
         self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.image_label.installEventFilter(self)
+        self.image_label.setCursor(Qt.OpenHandCursor)
+        self.image_label.mousePressEvent = self.on_mouse_press
         self.image_label.mouseMoveEvent = self.on_mouse_move
+        self.image_label.mouseReleaseEvent = self.on_mouse_release
 
         self.image_scroll = QScrollArea()
         self.image_scroll.setWidgetResizable(False)
         self.image_scroll.setAlignment(Qt.AlignCenter)
         self.image_scroll.setMinimumSize(640, 360)
         self.image_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image_scroll.installEventFilter(self)
         self.image_scroll.setWidget(self.image_label)
         self.image_scroll.viewport().installEventFilter(self)
 
@@ -133,8 +141,20 @@ class RadiometricImageViewer(QWidget):
         self.update_display_pixmap()
 
     def eventFilter(self, watched, event) -> bool:
+        if not hasattr(self, "image_scroll"):
+            return super().eventFilter(watched, event)
+
         if watched is self.image_scroll.viewport() and event.type() == QEvent.Resize:
             self.update_display_pixmap()
+
+        if watched in (self.image_scroll, self.image_scroll.viewport(), self.image_label):
+            if event.type() == QEvent.Wheel and self.should_zoom_with_wheel(event):
+                self.zoom_from_wheel(watched, event)
+                return True
+
+            if self.is_native_gesture_event(event):
+                if self.zoom_from_native_gesture(watched, event):
+                    return True
 
         return super().eventFilter(watched, event)
 
@@ -294,31 +314,111 @@ class RadiometricImageViewer(QWidget):
         self.update_zoom_label()
 
     def zoom_in(self) -> None:
-        if self.display_image is None:
-            return
-
-        if self.fit_to_view:
-            self.zoom_factor = self.current_fit_scale()
-
-        self.fit_to_view = False
-        self.zoom_factor = min(self.zoom_factor * 1.25, 8.0)
-        self.update_display_pixmap()
+        self.zoom_by(1.25)
 
     def zoom_out(self) -> None:
-        if self.display_image is None:
-            return
-
-        if self.fit_to_view:
-            self.zoom_factor = self.current_fit_scale()
-
-        self.fit_to_view = False
-        self.zoom_factor = max(self.zoom_factor / 1.25, 0.1)
-        self.update_display_pixmap()
+        self.zoom_by(1 / 1.25)
 
     def fit_zoom(self) -> None:
         self.fit_to_view = True
         self.zoom_factor = 1.0
         self.update_display_pixmap()
+
+    def zoom_by(self, factor: float, anchor_position: QPointF | None = None) -> None:
+        if self.display_image is None or factor <= 0:
+            return
+
+        pixmap = self.image_label.pixmap()
+        if pixmap is None:
+            self.update_display_pixmap()
+            pixmap = self.image_label.pixmap()
+
+        if pixmap is None:
+            return
+
+        viewport = self.image_scroll.viewport()
+        if anchor_position is None:
+            anchor_position = QPointF(viewport.rect().center())
+
+        label_anchor = self.image_label.mapFrom(viewport, anchor_position.toPoint())
+        relative_x = label_anchor.x() / max(1, pixmap.width())
+        relative_y = label_anchor.y() / max(1, pixmap.height())
+        relative_x = min(max(relative_x, 0.0), 1.0)
+        relative_y = min(max(relative_y, 0.0), 1.0)
+
+        if self.fit_to_view:
+            self.zoom_factor = self.current_fit_scale()
+
+        self.fit_to_view = False
+        self.zoom_factor = min(max(self.zoom_factor * factor, 0.1), 8.0)
+        self.update_display_pixmap()
+
+        new_pixmap = self.image_label.pixmap()
+        if new_pixmap is None:
+            return
+
+        hbar = self.image_scroll.horizontalScrollBar()
+        vbar = self.image_scroll.verticalScrollBar()
+        hbar.setValue(round(relative_x * new_pixmap.width() - anchor_position.x()))
+        vbar.setValue(round(relative_y * new_pixmap.height() - anchor_position.y()))
+
+    def should_zoom_with_wheel(self, event) -> bool:
+        modifiers = event.modifiers()
+        return bool(modifiers & (Qt.ControlModifier | Qt.MetaModifier))
+
+    def zoom_from_wheel(self, watched, event) -> None:
+        angle_delta = event.angleDelta().y()
+        if angle_delta:
+            factor = 1.0015 ** angle_delta
+        else:
+            factor = 1.01 ** event.pixelDelta().y()
+
+        self.zoom_by(factor, self.viewport_position_for_event(watched, event))
+        event.accept()
+
+    def is_native_gesture_event(self, event) -> bool:
+        native_gesture_type = getattr(QEvent, "NativeGesture", None)
+        if native_gesture_type is not None and event.type() == native_gesture_type:
+            return True
+
+        event_type_enum = getattr(QEvent, "Type", None)
+        native_gesture_type = getattr(event_type_enum, "NativeGesture", None)
+        return native_gesture_type is not None and event.type() == native_gesture_type
+
+    def zoom_from_native_gesture(self, watched, event) -> bool:
+        gesture_type_method = getattr(event, "gestureType", None)
+        value_method = getattr(event, "value", None)
+        if gesture_type_method is None or value_method is None:
+            return False
+
+        zoom_gesture = getattr(Qt, "ZoomNativeGesture", None)
+        native_gesture_enum = getattr(Qt, "NativeGestureType", None)
+        if zoom_gesture is None and native_gesture_enum is not None:
+            zoom_gesture = getattr(native_gesture_enum, "ZoomNativeGesture", None)
+
+        if zoom_gesture is None or gesture_type_method() != zoom_gesture:
+            return False
+
+        value = value_method()
+        if value == 0:
+            return True
+
+        self.zoom_by(max(0.2, 1.0 + value), self.viewport_position_for_event(watched, event))
+        event.accept()
+        return True
+
+    def viewport_position_for_event(self, watched, event) -> QPointF:
+        position_method = getattr(event, "position", None)
+        if position_method is not None:
+            position = position_method()
+        else:
+            position = event.pos()
+
+        if watched is self.image_scroll.viewport():
+            return QPointF(position)
+
+        mapped = watched.mapTo(self.image_scroll.viewport(), position.toPoint())
+        return QPointF(mapped)
 
     def update_zoom_label(self) -> None:
         if self.display_image is None or self.fit_to_view:
@@ -366,7 +466,29 @@ class RadiometricImageViewer(QWidget):
 
         return split_image
 
+    def on_mouse_press(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.LeftButton or self.image_label.pixmap() is None:
+            return
+
+        self.is_panning = True
+        self.pan_start_position = event.position()
+        self.pan_start_h_value = self.image_scroll.horizontalScrollBar().value()
+        self.pan_start_v_value = self.image_scroll.verticalScrollBar().value()
+        self.image_label.setCursor(Qt.ClosedHandCursor)
+        event.accept()
+
     def on_mouse_move(self, event: QMouseEvent) -> None:
+        if self.is_panning:
+            delta = event.position() - self.pan_start_position
+            self.image_scroll.horizontalScrollBar().setValue(
+                round(self.pan_start_h_value - delta.x())
+            )
+            self.image_scroll.verticalScrollBar().setValue(
+                round(self.pan_start_v_value - delta.y())
+            )
+            event.accept()
+            return
+
         if self.image is None:
             return
 
@@ -419,3 +541,11 @@ class RadiometricImageViewer(QWidget):
             f"thermal=({tx}, {ty}) | "
             f"temperature={temp_text}"
         )
+
+    def on_mouse_release(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.LeftButton or not self.is_panning:
+            return
+
+        self.is_panning = False
+        self.image_label.setCursor(Qt.OpenHandCursor)
+        event.accept()
