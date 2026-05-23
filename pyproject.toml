@@ -1,0 +1,18 @@
+[project]
+name = "thor-viewer"
+version = "0.1.0"
+description = "Open-source cross-platform viewer for the ThermalMaster Thor thermal camera"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "pyside6",
+]
+
+[project.scripts]
+thor-viewer = "thor_viewer.app:main"
+
+[build-system]
+requires = ["uv_build>=0.8.0,<0.9.0"]
+build-backend = "uv_build"

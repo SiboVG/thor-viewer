@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+.uv-cache/
+
+# Project-specific files
+thor_downloads/
+captures/
+recordings/
+failed_downloads.txt
+*.uyvy
+
+# Editor and OS files
+.idea/
+.vscode/
+.DS_Store
