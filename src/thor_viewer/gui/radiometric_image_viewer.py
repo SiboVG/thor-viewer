@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QScrollArea,
     QSlider,
+    QSpinBox,
     QButtonGroup,
     QVBoxLayout,
     QWidget,
@@ -51,6 +52,12 @@ class RadiometricImageViewer(QWidget):
         self.pan_start_position = QPointF()
         self.pan_start_h_value = 0
         self.pan_start_v_value = 0
+        self.visual_offset_x = 0
+        self.visual_offset_y = 0
+        self.is_aligning_visual = False
+        self.align_start_position = QPointF()
+        self.align_start_offset_x = 0
+        self.align_start_offset_y = 0
 
         self.open_button = QPushButton("Open image")
         self.open_button.clicked.connect(self.browse_file)
@@ -74,6 +81,45 @@ class RadiometricImageViewer(QWidget):
         self.blend_slider.setFixedWidth(180)
         self.blend_slider.valueChanged.connect(self.update_preview)
 
+        self.align_button = QPushButton("Align")
+        self.align_button.setCheckable(True)
+        self.align_button.setEnabled(False)
+        self.align_button.toggled.connect(self.on_align_toggled)
+
+        self.offset_x_spin = QSpinBox()
+        self.offset_x_spin.setRange(-9999, 9999)
+        self.offset_x_spin.setSuffix(" px")
+        self.offset_x_spin.setFixedWidth(84)
+        self.offset_x_spin.setKeyboardTracking(False)
+        self.offset_x_spin.setEnabled(False)
+        self.offset_x_spin.valueChanged.connect(self.update_visual_offset_from_controls)
+
+        self.offset_y_spin = QSpinBox()
+        self.offset_y_spin.setRange(-9999, 9999)
+        self.offset_y_spin.setSuffix(" px")
+        self.offset_y_spin.setFixedWidth(84)
+        self.offset_y_spin.setKeyboardTracking(False)
+        self.offset_y_spin.setEnabled(False)
+        self.offset_y_spin.valueChanged.connect(self.update_visual_offset_from_controls)
+
+        self.reset_offset_button = QPushButton("Reset")
+        self.reset_offset_button.setFixedWidth(56)
+        self.reset_offset_button.setEnabled(False)
+        self.reset_offset_button.clicked.connect(self.reset_visual_offset)
+
+        self.alignment_controls = QWidget()
+        alignment_layout = QHBoxLayout()
+        alignment_layout.setContentsMargins(0, 0, 0, 0)
+        alignment_layout.addWidget(QLabel("Visual offset"))
+        alignment_layout.addWidget(QLabel("X"))
+        alignment_layout.addWidget(self.offset_x_spin)
+        alignment_layout.addWidget(QLabel("Y"))
+        alignment_layout.addWidget(self.offset_y_spin)
+        alignment_layout.addWidget(self.reset_offset_button)
+        alignment_layout.addStretch()
+        self.alignment_controls.setLayout(alignment_layout)
+        self.alignment_controls.setVisible(False)
+
         self.zoom_out_button = QPushButton("-")
         self.zoom_out_button.setFixedWidth(32)
         self.zoom_out_button.clicked.connect(self.zoom_out)
@@ -96,7 +142,7 @@ class RadiometricImageViewer(QWidget):
         self.image_label.setMinimumSize(1, 1)
         self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.image_label.installEventFilter(self)
-        self.image_label.setCursor(Qt.OpenHandCursor)
+        self.update_image_cursor()
         self.image_label.mousePressEvent = self.on_mouse_press
         self.image_label.mouseMoveEvent = self.on_mouse_move
         self.image_label.mouseReleaseEvent = self.on_mouse_release
@@ -124,6 +170,8 @@ class RadiometricImageViewer(QWidget):
         controls_layout.addWidget(QLabel("Visual"))
         controls_layout.addWidget(self.blend_label)
         controls_layout.addSpacing(12)
+        controls_layout.addWidget(self.align_button)
+        controls_layout.addSpacing(12)
         controls_layout.addWidget(self.zoom_out_button)
         controls_layout.addWidget(self.zoom_label)
         controls_layout.addWidget(self.zoom_in_button)
@@ -132,6 +180,7 @@ class RadiometricImageViewer(QWidget):
 
         layout = QVBoxLayout()
         layout.addLayout(controls_layout)
+        layout.addWidget(self.alignment_controls)
         layout.addWidget(self.image_scroll, 1)
         layout.addWidget(self.info_label)
         self.setLayout(layout)
@@ -193,9 +242,11 @@ class RadiometricImageViewer(QWidget):
         self.blend_slider.blockSignals(True)
         self.blend_slider.setValue(0)
         self.blend_slider.blockSignals(False)
+        self.set_visual_offset(0, 0, update_preview=False)
         self.fit_to_view = True
         self.zoom_factor = 1.0
         self.update_blend_controls()
+        self.update_alignment_controls()
         self.update_preview()
 
         tmin = self.image.min_temperature()
@@ -243,6 +294,7 @@ class RadiometricImageViewer(QWidget):
             return
 
         self.update_blend_controls()
+        self.update_alignment_controls()
         visual_percent = self.blend_slider.value() if self.visual_image is not None else 0
         self.blend_label.setText(
             f"{visual_percent}%"
@@ -265,7 +317,7 @@ class RadiometricImageViewer(QWidget):
         blended = self.ir_preview_image.copy()
         painter = QPainter(blended)
         painter.setOpacity(visual_percent / 100)
-        painter.drawImage(0, 0, self.visual_image)
+        painter.drawImage(self.visual_offset_x, self.visual_offset_y, self.visual_image)
         painter.end()
 
         self.display_image = blended
@@ -447,6 +499,68 @@ class RadiometricImageViewer(QWidget):
             self.visual_image is not None and self.overlay_button.isChecked()
         )
 
+    def update_alignment_controls(self, checked: bool | None = None) -> None:
+        can_align = self.can_align_visual()
+        self.align_button.setEnabled(can_align)
+        self.offset_x_spin.setEnabled(can_align)
+        self.offset_y_spin.setEnabled(can_align)
+        self.reset_offset_button.setEnabled(can_align)
+        self.alignment_controls.setVisible(can_align and self.align_button.isChecked())
+
+        if not can_align:
+            self.is_aligning_visual = False
+
+        self.update_image_cursor()
+
+    def on_align_toggled(self, checked: bool) -> None:
+        if checked and self.can_align_visual() and self.blend_slider.value() == 0:
+            self.blend_slider.setValue(50)
+
+        self.update_alignment_controls()
+
+    def can_align_visual(self) -> bool:
+        return self.visual_image is not None and self.overlay_button.isChecked()
+
+    def should_drag_visual(self) -> bool:
+        return self.can_align_visual() and self.align_button.isChecked()
+
+    def update_image_cursor(self) -> None:
+        if not hasattr(self, "image_label"):
+            return
+
+        if self.is_panning:
+            self.image_label.setCursor(Qt.ClosedHandCursor)
+        elif self.should_drag_visual():
+            self.image_label.setCursor(Qt.SizeAllCursor)
+        else:
+            self.image_label.setCursor(Qt.OpenHandCursor)
+
+    def update_visual_offset_from_controls(self, value: int | None = None) -> None:
+        self.set_visual_offset(self.offset_x_spin.value(), self.offset_y_spin.value())
+
+    def reset_visual_offset(self) -> None:
+        self.set_visual_offset(0, 0)
+
+    def set_visual_offset(
+        self,
+        x: int,
+        y: int,
+        *,
+        update_preview: bool = True,
+    ) -> None:
+        self.visual_offset_x = x
+        self.visual_offset_y = y
+
+        self.offset_x_spin.blockSignals(True)
+        self.offset_y_spin.blockSignals(True)
+        self.offset_x_spin.setValue(x)
+        self.offset_y_spin.setValue(y)
+        self.offset_x_spin.blockSignals(False)
+        self.offset_y_spin.blockSignals(False)
+
+        if update_preview:
+            self.update_preview()
+
     def split_view_image(self) -> QImage:
         if self.ir_preview_image is None:
             return QImage()
@@ -470,14 +584,32 @@ class RadiometricImageViewer(QWidget):
         if event.button() != Qt.LeftButton or self.image_label.pixmap() is None:
             return
 
+        if self.should_drag_visual():
+            self.is_aligning_visual = True
+            self.align_start_position = event.position()
+            self.align_start_offset_x = self.visual_offset_x
+            self.align_start_offset_y = self.visual_offset_y
+            event.accept()
+            return
+
         self.is_panning = True
         self.pan_start_position = event.position()
         self.pan_start_h_value = self.image_scroll.horizontalScrollBar().value()
         self.pan_start_v_value = self.image_scroll.verticalScrollBar().value()
-        self.image_label.setCursor(Qt.ClosedHandCursor)
+        self.update_image_cursor()
         event.accept()
 
     def on_mouse_move(self, event: QMouseEvent) -> None:
+        if self.is_aligning_visual:
+            delta = event.position() - self.align_start_position
+            offset_delta = self.source_offset_delta_for_display_delta(delta)
+            self.set_visual_offset(
+                self.align_start_offset_x + int(offset_delta.x()),
+                self.align_start_offset_y + int(offset_delta.y()),
+            )
+            event.accept()
+            return
+
         if self.is_panning:
             delta = event.position() - self.pan_start_position
             self.image_scroll.horizontalScrollBar().setValue(
@@ -543,9 +675,25 @@ class RadiometricImageViewer(QWidget):
         )
 
     def on_mouse_release(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.LeftButton and self.is_aligning_visual:
+            self.is_aligning_visual = False
+            self.update_image_cursor()
+            event.accept()
+            return
+
         if event.button() != Qt.LeftButton or not self.is_panning:
             return
 
         self.is_panning = False
-        self.image_label.setCursor(Qt.OpenHandCursor)
+        self.update_image_cursor()
         event.accept()
+
+    def source_offset_delta_for_display_delta(self, delta: QPointF) -> QPointF:
+        pixmap = self.image_label.pixmap()
+        if pixmap is None or pixmap.width() <= 0 or pixmap.height() <= 0:
+            return QPointF()
+
+        return QPointF(
+            round(delta.x() * self.preview_width / pixmap.width()),
+            round(delta.y() * self.preview_height / pixmap.height()),
+        )
