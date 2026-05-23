@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QRadioButton,
     QSizePolicy,
+    QScrollArea,
     QSlider,
     QButtonGroup,
     QVBoxLayout,
@@ -44,6 +45,8 @@ class RadiometricImageViewer(QWidget):
         self.ir_preview_image: QImage | None = None
         self.visual_image: QImage | None = None
         self.display_image: QImage | None = None
+        self.zoom_factor = 1.0
+        self.fit_to_view = True
 
         self.open_button = QPushButton("Open image")
         self.open_button.clicked.connect(self.browse_file)
@@ -67,13 +70,37 @@ class RadiometricImageViewer(QWidget):
         self.blend_slider.setFixedWidth(180)
         self.blend_slider.valueChanged.connect(self.update_preview)
 
+        self.zoom_out_button = QPushButton("-")
+        self.zoom_out_button.setFixedWidth(32)
+        self.zoom_out_button.clicked.connect(self.zoom_out)
+
+        self.zoom_label = QLabel("Fit")
+        self.zoom_label.setAlignment(Qt.AlignCenter)
+        self.zoom_label.setFixedWidth(48)
+
+        self.zoom_in_button = QPushButton("+")
+        self.zoom_in_button.setFixedWidth(32)
+        self.zoom_in_button.clicked.connect(self.zoom_in)
+
+        self.fit_button = QPushButton("Fit")
+        self.fit_button.setFixedWidth(44)
+        self.fit_button.clicked.connect(self.fit_zoom)
+
         self.image_label = ImageDisplayLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMouseTracking(True)
-        self.image_label.setMinimumSize(640, 360)
-        self.image_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image_label.setMinimumSize(1, 1)
+        self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.image_label.installEventFilter(self)
         self.image_label.mouseMoveEvent = self.on_mouse_move
+
+        self.image_scroll = QScrollArea()
+        self.image_scroll.setWidgetResizable(False)
+        self.image_scroll.setAlignment(Qt.AlignCenter)
+        self.image_scroll.setMinimumSize(640, 360)
+        self.image_scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.image_scroll.setWidget(self.image_label)
+        self.image_scroll.viewport().installEventFilter(self)
 
         self.info_label = QLabel("Open a radiometric IR image")
         self.info_label.setAlignment(Qt.AlignLeft)
@@ -88,11 +115,16 @@ class RadiometricImageViewer(QWidget):
         controls_layout.addWidget(self.blend_slider)
         controls_layout.addWidget(QLabel("Visual"))
         controls_layout.addWidget(self.blend_label)
+        controls_layout.addSpacing(12)
+        controls_layout.addWidget(self.zoom_out_button)
+        controls_layout.addWidget(self.zoom_label)
+        controls_layout.addWidget(self.zoom_in_button)
+        controls_layout.addWidget(self.fit_button)
         controls_layout.addStretch()
 
         layout = QVBoxLayout()
         layout.addLayout(controls_layout)
-        layout.addWidget(self.image_label, 1)
+        layout.addWidget(self.image_scroll, 1)
         layout.addWidget(self.info_label)
         self.setLayout(layout)
 
@@ -101,7 +133,7 @@ class RadiometricImageViewer(QWidget):
         self.update_display_pixmap()
 
     def eventFilter(self, watched, event) -> bool:
-        if watched is self.image_label and event.type() == QEvent.Resize:
+        if watched is self.image_scroll.viewport() and event.type() == QEvent.Resize:
             self.update_display_pixmap()
 
         return super().eventFilter(watched, event)
@@ -141,6 +173,8 @@ class RadiometricImageViewer(QWidget):
         self.blend_slider.blockSignals(True)
         self.blend_slider.setValue(0)
         self.blend_slider.blockSignals(False)
+        self.fit_to_view = True
+        self.zoom_factor = 1.0
         self.update_blend_controls()
         self.update_preview()
 
@@ -242,7 +276,11 @@ class RadiometricImageViewer(QWidget):
         if self.display_image is None:
             return
 
-        target_size = self.image_label.size()
+        if self.fit_to_view:
+            target_size = self.image_scroll.viewport().size()
+        else:
+            target_size = self.display_image.size() * self.zoom_factor
+
         if target_size.width() <= 0 or target_size.height() <= 0:
             return
 
@@ -252,6 +290,57 @@ class RadiometricImageViewer(QWidget):
             Qt.SmoothTransformation,
         )
         self.image_label.setPixmap(pixmap)
+        self.image_label.resize(pixmap.size())
+        self.update_zoom_label()
+
+    def zoom_in(self) -> None:
+        if self.display_image is None:
+            return
+
+        if self.fit_to_view:
+            self.zoom_factor = self.current_fit_scale()
+
+        self.fit_to_view = False
+        self.zoom_factor = min(self.zoom_factor * 1.25, 8.0)
+        self.update_display_pixmap()
+
+    def zoom_out(self) -> None:
+        if self.display_image is None:
+            return
+
+        if self.fit_to_view:
+            self.zoom_factor = self.current_fit_scale()
+
+        self.fit_to_view = False
+        self.zoom_factor = max(self.zoom_factor / 1.25, 0.1)
+        self.update_display_pixmap()
+
+    def fit_zoom(self) -> None:
+        self.fit_to_view = True
+        self.zoom_factor = 1.0
+        self.update_display_pixmap()
+
+    def update_zoom_label(self) -> None:
+        if self.display_image is None or self.fit_to_view:
+            self.zoom_label.setText("Fit")
+            return
+
+        self.zoom_label.setText(f"{round(self.zoom_factor * 100)}%")
+
+    def current_fit_scale(self) -> float:
+        if self.display_image is None:
+            return 1.0
+
+        source_size = self.display_image.size()
+        target_size = self.image_scroll.viewport().size()
+
+        if source_size.width() <= 0 or source_size.height() <= 0:
+            return 1.0
+
+        return min(
+            target_size.width() / source_size.width(),
+            target_size.height() / source_size.height(),
+        )
 
     def update_blend_controls(self) -> None:
         self.blend_slider.setEnabled(
@@ -285,17 +374,11 @@ class RadiometricImageViewer(QWidget):
         if pixmap is None:
             return
 
-        # Convert label coordinates to pixmap/image coordinates.
-        label_w = self.image_label.width()
-        label_h = self.image_label.height()
         pix_w = pixmap.width()
         pix_h = pixmap.height()
 
-        offset_x = (label_w - pix_w) // 2
-        offset_y = (label_h - pix_h) // 2
-
-        x = int(event.position().x()) - offset_x
-        y = int(event.position().y()) - offset_y
+        x = int(event.position().x())
+        y = int(event.position().y())
 
         if x < 0 or y < 0 or x >= pix_w or y >= pix_h:
             return
