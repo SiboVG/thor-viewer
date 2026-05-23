@@ -2,10 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import cv2
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QImage, QMouseEvent, QPixmap
-from PySide6.QtWidgets import QFileDialog, QLabel, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtGui import QImage, QMouseEvent, QPainter, QPixmap
+from PySide6.QtWidgets import (
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QMessageBox,
+    QPushButton,
+    QSlider,
+    QVBoxLayout,
+    QWidget,
+)
 
 from thor_viewer.backend.radiometric_jpeg import load_radiometric_jpeg
 
@@ -17,9 +25,21 @@ class RadiometricImageViewer(QWidget):
         self.image = None
         self.preview_width = 640
         self.preview_height = 480
+        self.ir_preview_image: QImage | None = None
+        self.visual_image: QImage | None = None
 
-        self.open_button = QPushButton("Open IR image")
+        self.open_button = QPushButton("Open image")
         self.open_button.clicked.connect(self.browse_file)
+
+        self.blend_label = QLabel("0%")
+        self.blend_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        self.blend_label.setFixedWidth(44)
+        self.blend_slider = QSlider(Qt.Horizontal)
+        self.blend_slider.setRange(0, 100)
+        self.blend_slider.setValue(0)
+        self.blend_slider.setEnabled(False)
+        self.blend_slider.setFixedWidth(180)
+        self.blend_slider.valueChanged.connect(self.update_blended_preview)
 
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
@@ -29,8 +49,17 @@ class RadiometricImageViewer(QWidget):
         self.info_label = QLabel("Open a radiometric IR image")
         self.info_label.setAlignment(Qt.AlignLeft)
 
+        blend_layout = QHBoxLayout()
+        blend_layout.addWidget(QLabel("Blend"))
+        blend_layout.addWidget(QLabel("IR"))
+        blend_layout.addWidget(self.blend_slider)
+        blend_layout.addWidget(QLabel("Visual"))
+        blend_layout.addWidget(self.blend_label)
+        blend_layout.addStretch()
+
         layout = QVBoxLayout()
         layout.addWidget(self.open_button)
+        layout.addLayout(blend_layout)
         layout.addWidget(self.image_label)
         layout.addWidget(self.info_label)
         self.setLayout(layout)
@@ -38,7 +67,7 @@ class RadiometricImageViewer(QWidget):
     def browse_file(self) -> None:
         filename, _ = QFileDialog.getOpenFileName(
             self,
-            "Open radiometric IR image",
+            "Open IR or visual image",
             "",
             "Images (*.jpg *.jpeg);;All files (*)",
         )
@@ -49,31 +78,92 @@ class RadiometricImageViewer(QWidget):
         self.open_file(Path(filename))
 
     def open_file(self, path: Path) -> None:
-        self.image = load_radiometric_jpeg(path)
+        ir_path = self.ir_path_for(path)
 
-        # Decode only the normal JPEG preview part for display.
-        jpeg_bytes = self.image.preview_jpeg
-        qimg = QImage.fromData(jpeg_bytes)
+        try:
+            self.image = load_radiometric_jpeg(ir_path)
+        except Exception as exc:
+            QMessageBox.warning(self, "Open image", str(exc))
+            return
+
+        qimg = QImage.fromData(self.image.preview_jpeg)
+        if qimg.isNull():
+            QMessageBox.warning(self, "Open image", "Could not decode IR preview image.")
+            return
 
         self.preview_width = qimg.width()
         self.preview_height = qimg.height()
+        self.ir_preview_image = qimg.convertToFormat(QImage.Format_ARGB32)
+        self.visual_image = self.load_visual_image(ir_path)
 
-        self.image_label.setPixmap(QPixmap.fromImage(qimg))
+        self.blend_slider.blockSignals(True)
+        self.blend_slider.setValue(0)
+        self.blend_slider.setEnabled(self.visual_image is not None)
+        self.blend_slider.blockSignals(False)
+        self.update_blended_preview()
 
         tmin = self.image.min_temperature()
         tmax = self.image.max_temperature()
         tmin_text = "N/A" if tmin is None else f"{tmin:.2f} °C"
         tmax_text = "N/A" if tmax is None else f"{tmax:.2f} °C"
 
-        meta = self.image.metadata
-        roi = meta.get("roi", [])
-
         self.info_label.setText(
-            f"{path.name} | "
+            f"{ir_path.name} | "
             f"{self.preview_width}×{self.preview_height} preview | "
             f"{self.image.temperature.shape[1]}×{self.image.temperature.shape[0]} thermal | "
             f"min={tmin_text} max={tmax_text}"
         )
+
+    def ir_path_for(self, path: Path) -> Path:
+        if path.name.endswith("-DC.jpg"):
+            return path.with_name(f"{path.name.removesuffix('-DC.jpg')}-IR.jpg")
+
+        return path
+
+    def visual_path_for(self, ir_path: Path) -> Path | None:
+        if not ir_path.name.endswith("-IR.jpg"):
+            return None
+
+        return ir_path.with_name(f"{ir_path.name.removesuffix('-IR.jpg')}-DC.jpg")
+
+    def load_visual_image(self, ir_path: Path) -> QImage | None:
+        visual_path = self.visual_path_for(ir_path)
+        if visual_path is None or not visual_path.exists():
+            return None
+
+        image = QImage(str(visual_path))
+        if image.isNull():
+            return None
+
+        return image.scaled(
+            self.preview_width,
+            self.preview_height,
+            Qt.IgnoreAspectRatio,
+            Qt.SmoothTransformation,
+        ).convertToFormat(QImage.Format_ARGB32)
+
+    def update_blended_preview(self) -> None:
+        if self.ir_preview_image is None:
+            return
+
+        visual_percent = self.blend_slider.value() if self.visual_image is not None else 0
+        self.blend_label.setText(
+            f"{visual_percent}%"
+            if self.visual_image is not None
+            else "N/A"
+        )
+
+        if self.visual_image is None or visual_percent == 0:
+            self.image_label.setPixmap(QPixmap.fromImage(self.ir_preview_image))
+            return
+
+        blended = self.ir_preview_image.copy()
+        painter = QPainter(blended)
+        painter.setOpacity(visual_percent / 100)
+        painter.drawImage(0, 0, self.visual_image)
+        painter.end()
+
+        self.image_label.setPixmap(QPixmap.fromImage(blended))
 
     def on_mouse_move(self, event: QMouseEvent) -> None:
         if self.image is None:
