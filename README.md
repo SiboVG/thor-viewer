@@ -29,6 +29,7 @@ If the camera is not detected, open the Live tab, refresh devices, and connect t
 ## Development
 
 ```bash
+uv run python -m unittest discover -s tests
 uv run python -m compileall src scripts main.py
 ```
 

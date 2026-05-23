@@ -44,6 +44,7 @@ class UvcCamera:
         cap.set(cv2.CAP_PROP_FPS, self.fps)
 
         if not cap.isOpened():
+            cap.release()
             raise RuntimeError(f"Could not open camera index {self.index}")
 
         stop_event = Event()
@@ -59,28 +60,32 @@ class UvcCamera:
         failed_reads = 0
         failed_read_limit = max(10, self.fps)
 
-        while not stop_event.is_set():
-            ok, frame = cap.read()
-            if not ok:
-                failed_reads += 1
-                if failed_reads >= failed_read_limit:
-                    with self._lock:
-                        self._error_message = "Camera disconnected or stopped sending frames"
+        try:
+            while not stop_event.is_set():
+                ok, frame = cap.read()
+                if not ok:
+                    failed_reads += 1
+                    if failed_reads >= failed_read_limit:
+                        with self._lock:
+                            self._error_message = (
+                                "Camera disconnected or stopped sending frames"
+                            )
 
-                    if self._cap is cap:
-                        self._cap = None
+                        if self._cap is cap:
+                            self._cap = None
 
-                    cap.release()
-                    return
+                        return
 
-                time.sleep(0.02)
-                continue
+                    time.sleep(0.02)
+                    continue
 
-            failed_reads = 0
+                failed_reads = 0
 
-            with self._lock:
-                self._latest_frame = frame
-                self._latest_sequence += 1
+                with self._lock:
+                    self._latest_frame = frame
+                    self._latest_sequence += 1
+        finally:
+            cap.release()
 
     def read_latest(self) -> tuple[int, np.ndarray] | None:
         if self._cap is None:
@@ -116,11 +121,10 @@ class UvcCamera:
         cap = self._cap
         self._cap = None
 
-        if cap is not None:
-            cap.release()
-
         if thread is not None:
             thread.join(timeout=1.0)
+        elif cap is not None:
+            cap.release()
 
         with self._lock:
             self._latest_frame = None
