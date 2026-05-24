@@ -170,7 +170,7 @@ class StorageBrowser(QWidget):
 
         self.sync_button = QPushButton("Sync SD card")
         set_button_icon(self.sync_button, "refresh-cw")
-        self.sync_button.clicked.connect(self.sync)
+        self.sync_button.clicked.connect(self.on_sync_button_clicked)
 
         self.analyse_button = QPushButton("Analyse selected")
         set_button_icon(self.analyse_button, "activity")
@@ -232,6 +232,25 @@ class StorageBrowser(QWidget):
             self.current_refresh_task.cancel()
         if self.current_sync_task is not None:
             self.current_sync_task.cancel()
+
+    def on_sync_button_clicked(self) -> None:
+        if self.syncing:
+            self.stop_sync()
+            return
+
+        self.sync()
+
+    def stop_sync(self) -> None:
+        if not self.syncing:
+            return
+
+        if self.current_refresh_task is not None:
+            self.current_refresh_task.cancel()
+        if self.current_sync_task is not None:
+            self.current_sync_task.cancel()
+
+        self.status_label.setText("Stopping sync...")
+        self.update_action_buttons()
 
     def sync(self) -> None:
         if self.syncing or not self.device_connected:
@@ -384,7 +403,8 @@ class StorageBrowser(QWidget):
 
     def update_action_buttons(self) -> None:
         has_selection = self.selected_pair_obj is not None
-        self.sync_button.setEnabled(self.device_connected and not self.syncing)
+        self.sync_button.setText("Stop syncing" if self.syncing else "Sync SD card")
+        self.sync_button.setEnabled(self.device_connected)
         self.analyse_button.setEnabled(has_selection)
         self.save_button.setEnabled(has_selection)
 

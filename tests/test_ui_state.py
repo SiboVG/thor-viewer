@@ -40,9 +40,38 @@ class UiStateTest(unittest.TestCase):
         browser.syncing = True
         browser.update_action_buttons()
 
-        self.assertFalse(browser.sync_button.isEnabled())
+        self.assertTrue(browser.sync_button.isEnabled())
+        self.assertEqual(browser.sync_button.text(), "Stop syncing")
         self.assertTrue(browser.analyse_button.isEnabled())
         self.assertTrue(browser.save_button.isEnabled())
+
+        browser.syncing = False
+        browser.update_action_buttons()
+
+        self.assertEqual(browser.sync_button.text(), "Sync SD card")
+
+    def test_stop_sync_cancels_active_tasks(self) -> None:
+        class DummyTask:
+            def __init__(self) -> None:
+                self.cancelled = False
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+        browser = StorageBrowser()
+        refresh_task = DummyTask()
+        sync_task = DummyTask()
+        browser.current_refresh_task = refresh_task
+        browser.current_sync_task = sync_task
+        browser.syncing = True
+        browser.set_device_connected(True)
+
+        browser.stop_sync()
+
+        self.assertTrue(refresh_task.cancelled)
+        self.assertTrue(sync_task.cancelled)
+        self.assertEqual(browser.status_label.text(), "Stopping sync...")
+        self.assertEqual(browser.sync_button.text(), "Stop syncing")
 
     def test_analysis_controls_are_disabled_until_image_is_loaded(self) -> None:
         viewer = RadiometricImageViewer()
