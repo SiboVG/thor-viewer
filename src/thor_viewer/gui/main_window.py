@@ -31,6 +31,7 @@ from thor_viewer.config.settings import (
 from thor_viewer.processing.overlays import draw_crosshair, draw_recording_dot
 from thor_viewer.gui.storage_browser import StorageBrowser
 from thor_viewer.gui.radiometric_image_viewer import RadiometricImageViewer
+from thor_viewer.gui.icons import set_button_icon
 
 
 THOR_CAMERA_TERMS = ("thermalmaster", "thermal master", "thor", "thermal")
@@ -70,20 +71,25 @@ class MainWindow(QWidget):
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(220)
         self.refresh_devices_button = QPushButton("Refresh devices")
+        set_button_icon(self.refresh_devices_button, "refresh-cw")
         self.refresh_devices_button.clicked.connect(self.refresh_camera_devices)
 
         self.connect_button = QPushButton("Connect")
+        set_button_icon(self.connect_button, "plug")
         self.connect_button.clicked.connect(self.connect_selected_camera)
 
         self.disconnect_button = QPushButton("Disconnect")
+        set_button_icon(self.disconnect_button, "unplug")
         self.disconnect_button.clicked.connect(self.disconnect_camera)
 
         self.camera_status_label = QLabel("Camera disconnected")
 
         self.snapshot_button = QPushButton("Snapshot")
+        set_button_icon(self.snapshot_button, "camera")
         self.snapshot_button.clicked.connect(self.save_snapshot)
 
         self.record_button = QPushButton("Start recording")
+        set_button_icon(self.record_button, "video")
         self.record_button.clicked.connect(self.toggle_recording)
 
         buttons = QHBoxLayout()

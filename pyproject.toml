@@ -3,6 +3,8 @@ name = "thor-viewer"
 version = "0.1.0"
 description = "Open-source cross-platform viewer for the ThermalMaster Thor thermal camera"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.10"
 dependencies = [
     "numpy",

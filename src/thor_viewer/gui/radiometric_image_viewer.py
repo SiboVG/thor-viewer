@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from thor_viewer.backend.radiometric_jpeg import load_radiometric_jpeg
+from thor_viewer.gui.icons import set_button_icon
 
 
 class ImageDisplayLabel(QLabel):
@@ -60,6 +61,7 @@ class RadiometricImageViewer(QWidget):
         self.align_start_offset_y = 0
 
         self.open_button = QPushButton("Open image")
+        set_button_icon(self.open_button, "folder-open")
         self.open_button.clicked.connect(self.browse_file)
 
         self.overlay_button = QRadioButton("Overlay")
@@ -84,6 +86,7 @@ class RadiometricImageViewer(QWidget):
         self.align_button = QPushButton("Align")
         self.align_button.setCheckable(True)
         self.align_button.setEnabled(False)
+        set_button_icon(self.align_button, "move")
         self.align_button.toggled.connect(self.on_align_toggled)
 
         self.offset_x_spin = QSpinBox()
@@ -103,8 +106,9 @@ class RadiometricImageViewer(QWidget):
         self.offset_y_spin.valueChanged.connect(self.update_visual_offset_from_controls)
 
         self.reset_offset_button = QPushButton("Reset")
-        self.reset_offset_button.setFixedWidth(56)
+        self.reset_offset_button.setFixedWidth(78)
         self.reset_offset_button.setEnabled(False)
+        set_button_icon(self.reset_offset_button, "rotate-ccw")
         self.reset_offset_button.clicked.connect(self.reset_visual_offset)
 
         self.alignment_controls = QWidget()
@@ -121,7 +125,9 @@ class RadiometricImageViewer(QWidget):
         self.alignment_controls.setLayout(alignment_layout)
         self.alignment_controls.setVisible(False)
 
-        self.zoom_out_button = QPushButton("-")
+        self.zoom_out_button = QPushButton()
+        self.zoom_out_button.setToolTip("Zoom out")
+        set_button_icon(self.zoom_out_button, "zoom-out")
         self.zoom_out_button.setFixedWidth(32)
         self.zoom_out_button.clicked.connect(self.zoom_out)
 
@@ -129,12 +135,15 @@ class RadiometricImageViewer(QWidget):
         self.zoom_label.setAlignment(Qt.AlignCenter)
         self.zoom_label.setFixedWidth(48)
 
-        self.zoom_in_button = QPushButton("+")
+        self.zoom_in_button = QPushButton()
+        self.zoom_in_button.setToolTip("Zoom in")
+        set_button_icon(self.zoom_in_button, "zoom-in")
         self.zoom_in_button.setFixedWidth(32)
         self.zoom_in_button.clicked.connect(self.zoom_in)
 
         self.fit_button = QPushButton("Fit")
-        self.fit_button.setFixedWidth(44)
+        set_button_icon(self.fit_button, "maximize")
+        self.fit_button.setFixedWidth(64)
         self.fit_button.clicked.connect(self.fit_zoom)
 
         self.image_label = ImageDisplayLabel()

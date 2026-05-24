@@ -38,6 +38,7 @@ from thor_viewer.backend.mtp_storage import (
     MtpNotFoundError,
     MtpStorage,
 )
+from thor_viewer.gui.icons import set_button_icon
 
 
 DOWNLOAD_DIR = Path("thor_downloads")
@@ -168,12 +169,15 @@ class StorageBrowser(QWidget):
         self.status_label.setObjectName("statusLabel")
 
         self.sync_button = QPushButton("Sync SD card")
+        set_button_icon(self.sync_button, "refresh-cw")
         self.sync_button.clicked.connect(self.sync)
 
         self.analyse_button = QPushButton("Analyse selected")
+        set_button_icon(self.analyse_button, "activity")
         self.analyse_button.clicked.connect(self.analyse_selected)
 
         self.save_button = QPushButton("Save selected...")
+        set_button_icon(self.save_button, "download")
         self.save_button.clicked.connect(self.save_selected)
         self.update_action_buttons()
 
