@@ -18,7 +18,9 @@ Screenshots below use generated demo data.
 
 ![Storage browser](docs/screenshots/storage.png)
 
-![Analysis view](docs/screenshots/analysis.png)
+![Analysis overlay mode](docs/screenshots/analysis.png)
+
+![Analysis split view](docs/screenshots/analysis-split-view.png)
 
 ## Requirements
 
