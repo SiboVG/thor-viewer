@@ -38,6 +38,16 @@ uv run thor-viewer
 
 If the camera is not detected, open the Live tab, refresh devices, and connect the Thor camera. Open the Storage tab to sync SD-card captures into `thor_downloads/`.
 
+## Troubleshooting
+
+### Windows: Thor camera is not detected
+
+If the Thor appears in Device Manager or Wireshark/USBPcap but Thor Viewer says "No Thor camera found", check camera privacy and security-app permissions:
+
+- Open Windows Settings > Privacy & security > Camera and enable camera access for desktop apps.
+- If you use Bitdefender or another antivirus/privacy tool, allow webcam/camera access for Thor Viewer, Python, or the terminal you use to run `uv run thor-viewer`.
+- Close other apps that may already be using the Thor camera, then restart Thor Viewer and press Refresh devices.
+
 ## Development
 
 ```bash

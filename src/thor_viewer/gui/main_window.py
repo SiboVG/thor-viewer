@@ -1,4 +1,6 @@
 from datetime import datetime
+import platform
+import re
 
 import cv2
 import numpy as np
@@ -20,6 +22,7 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 
+from thor_viewer.backend.camera import UvcCamera
 from thor_viewer.backend.recorder import VideoRecorder
 from thor_viewer.config.settings import (
     CAPTURE_DIR,
@@ -37,6 +40,7 @@ from thor_viewer.gui.icons import app_icon, set_button_icon
 THOR_CAMERA_TERMS = ("thermalmaster", "thermal master", "thor", "thermal")
 THOR_CAMERA_USB_SIGNATURES = (
     "1d6b1102",  # RAYSENSE Thor reports as generic "UVC Camera 0" on macOS.
+    "vid1d6bpid1102",  # Windows Qt device id: usb#vid_1d6b&pid_1102...
 )
 
 
@@ -51,6 +55,10 @@ class MainWindow(QWidget):
         RECORDING_DIR.mkdir(exist_ok=True)
 
         self.camera: QCamera | None = None
+        self.opencv_camera: UvcCamera | None = None
+        self.opencv_frame_timer = QTimer(self)
+        self.opencv_frame_timer.timeout.connect(self.poll_opencv_camera)
+        self.last_opencv_sequence = 0
         self.capture_session = QMediaCaptureSession(self)
         self.video_sink = QVideoSink(self)
         self.video_sink.videoFrameChanged.connect(self.on_video_frame)
@@ -240,7 +248,7 @@ class MainWindow(QWidget):
         except Exception:
             raw_id = str(device.id())
 
-        return raw_id.casefold().replace("0x", "").replace(":", "").replace("-", "")
+        return re.sub(r"[^a-z0-9]", "", raw_id.casefold().replace("0x", ""))
 
     @staticmethod
     def camera_device_label(device) -> str:
@@ -270,7 +278,7 @@ class MainWindow(QWidget):
         self.populate_camera_devices()
         refreshed_device_id = self.selected_camera_device_id()
         still_connected = (
-            self.camera is not None
+            self.has_active_camera()
             and connected_device_id is not None
             and connected_device_id == refreshed_device_id
         )
@@ -278,7 +286,7 @@ class MainWindow(QWidget):
             self.set_camera_connected_ui(True, self.connected_camera_status())
             return
 
-        if self.camera is not None:
+        if self.has_active_camera():
             self.disconnect_camera()
 
         status = (
@@ -392,7 +400,7 @@ class MainWindow(QWidget):
             self.pending_live_restart = True
             return
 
-        if self.camera is not None:
+        if self.has_active_camera():
             return
 
         selected_device = self.selected_camera_device()
@@ -400,6 +408,25 @@ class MainWindow(QWidget):
             self.image_label.clear()
             self.image_label.setText("No Thor camera found")
             self.set_camera_connected_ui(False, "No Thor camera found")
+            return
+
+        if self.should_use_opencv_live_camera():
+            try:
+                camera_index = self.camera_index_for_device(selected_device)
+                opencv_camera = UvcCamera(camera_index, WIDTH, HEIGHT, FPS)
+                opencv_camera.open()
+            except Exception as exc:
+                self.on_camera_error(str(exc))
+                return
+
+            self.opencv_camera = opencv_camera
+            self.last_opencv_sequence = 0
+            self.opencv_frame_timer.start(max(1, round(1000 / FPS)))
+            self.last_frame_sequence = 0
+            self.reported_camera_error = None
+            self.dark_frame_count = 0
+            self.connected_device_id = self.normalized_camera_device_id(selected_device)
+            self.set_camera_connected_ui(True, self.connected_camera_status())
             return
 
         self.camera = QCamera(selected_device, self)
@@ -418,6 +445,44 @@ class MainWindow(QWidget):
             self.on_camera_error(message)
         else:
             self.on_camera_error(str(error))
+
+    def poll_opencv_camera(self) -> None:
+        opencv_camera = self.opencv_camera
+        if opencv_camera is None:
+            return
+
+        error_message = opencv_camera.error_message
+        if error_message is not None:
+            self.on_camera_error(error_message)
+            return
+
+        latest = opencv_camera.read_latest()
+        if latest is None:
+            return
+
+        sequence, frame = latest
+        if sequence == self.last_opencv_sequence:
+            return
+
+        self.last_opencv_sequence = sequence
+        self.handle_camera_frame(frame)
+
+    def has_active_camera(self) -> bool:
+        return (
+            getattr(self, "camera", None) is not None
+            or getattr(self, "opencv_camera", None) is not None
+        )
+
+    def should_use_opencv_live_camera(self) -> bool:
+        return platform.system() == "Windows"
+
+    def camera_index_for_device(self, selected_device) -> int:
+        selected_id = self.normalized_camera_device_id(selected_device)
+        for index, device in enumerate(QMediaDevices.videoInputs()):
+            if self.normalized_camera_device_id(device) == selected_id:
+                return index
+
+        return 0
 
     def connected_camera_status(self) -> str:
         device_name = self.device_combo.currentText()
@@ -438,6 +503,14 @@ class MainWindow(QWidget):
     def close_camera(self) -> None:
         camera = self.camera
         self.camera = None
+
+        opencv_camera = getattr(self, "opencv_camera", None)
+        self.opencv_camera = None
+        self.last_opencv_sequence = 0
+        if hasattr(self, "opencv_frame_timer"):
+            self.opencv_frame_timer.stop()
+        if opencv_camera is not None:
+            opencv_camera.close()
 
         if camera is None:
             return

@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch
 
 import numpy as np
 
@@ -41,12 +42,61 @@ class CameraDetectionTest(unittest.TestCase):
         self.assertTrue(MainWindow.is_thor_camera_device(device))
         self.assertEqual(MainWindow.camera_device_label(device), "Thor (UVC Camera 0)")
 
+    def test_accepts_windows_generic_uvc_thor_by_usb_signature(self) -> None:
+        device = FakeCameraDevice(
+            "UVC Camera 0",
+            rb"\\?\usb#vid_1d6b&pid_1102&mi_03#b&9913074&0&0003#",
+        )
+
+        self.assertTrue(MainWindow.is_thor_camera_device(device))
+        self.assertEqual(MainWindow.camera_device_label(device), "Thor (UVC Camera 0)")
+
     def test_black_frame_detection(self) -> None:
         black = np.zeros((8, 8, 3), dtype=np.uint8)
         visible = np.full((8, 8, 3), 32, dtype=np.uint8)
 
         self.assertTrue(MainWindow.is_nearly_black_frame(None, black))
         self.assertFalse(MainWindow.is_nearly_black_frame(None, visible))
+
+    def test_windows_live_camera_uses_opencv_backend(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with patch("thor_viewer.gui.main_window.platform.system", return_value="Windows"):
+            self.assertTrue(window.should_use_opencv_live_camera())
+
+    def test_non_windows_live_camera_uses_qt_backend(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with patch("thor_viewer.gui.main_window.platform.system", return_value="Darwin"):
+            self.assertFalse(window.should_use_opencv_live_camera())
+
+    def test_camera_index_for_device_uses_qt_device_order(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        webcam = FakeCameraDevice("External Webcam", b"webcam-id")
+        thor = FakeCameraDevice(
+            "UVC Camera 0",
+            rb"\\?\usb#vid_1d6b&pid_1102&mi_03#b&9913074&0&0003#",
+        )
+
+        with patch(
+            "thor_viewer.gui.main_window.QMediaDevices.videoInputs",
+            return_value=[webcam, thor],
+        ):
+            self.assertEqual(window.camera_index_for_device(thor), 1)
+
+    def test_has_active_camera_accepts_qt_or_opencv_backend(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        window.camera = None
+        window.opencv_camera = None
+
+        self.assertFalse(window.has_active_camera())
+
+        window.opencv_camera = object()
+        self.assertTrue(window.has_active_camera())
+
+        window.opencv_camera = None
+        window.camera = object()
+        self.assertTrue(window.has_active_camera())
 
     def test_selects_existing_device_id_after_refresh(self) -> None:
         window = MainWindow.__new__(MainWindow)
