@@ -1,9 +1,12 @@
 import unittest
 
-from thor_viewer.gui.icons import ICON_DIR
+from thor_viewer.gui.icons import ASSET_DIR, ICON_DIR
 
 
 class IconAssetsTest(unittest.TestCase):
+    def test_app_icon_exists(self) -> None:
+        self.assertTrue((ASSET_DIR / "app-icon.svg").exists())
+
     def test_used_lucide_icons_and_license_exist(self) -> None:
         icon_names = {
             "activity",

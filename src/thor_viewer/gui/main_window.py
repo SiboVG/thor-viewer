@@ -31,7 +31,7 @@ from thor_viewer.config.settings import (
 from thor_viewer.processing.overlays import draw_crosshair, draw_recording_dot
 from thor_viewer.gui.storage_browser import StorageBrowser
 from thor_viewer.gui.radiometric_image_viewer import RadiometricImageViewer
-from thor_viewer.gui.icons import set_button_icon
+from thor_viewer.gui.icons import app_icon, set_button_icon
 
 
 THOR_CAMERA_TERMS = ("thermalmaster", "thermal master", "thor", "thermal")
@@ -45,6 +45,7 @@ class MainWindow(QWidget):
         super().__init__()
 
         self.setWindowTitle("ThermalMaster Thor Viewer")
+        self.setWindowIcon(app_icon())
 
         CAPTURE_DIR.mkdir(exist_ok=True)
         RECORDING_DIR.mkdir(exist_ok=True)

@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 512 512" role="img" aria-label="Thor Viewer logo">
+  <defs>
+    <filter id="device-shadow" x="-10%" y="-10%" width="120%" height="120%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#0a0d15" flood-opacity="0.6"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="110" fill="#1c2234"/>
+  <g transform="translate(0 -5)" filter="url(#device-shadow)">
+    <path d="M190 56Q256 46 322 56Q358 66 358 120V220Q358 255 330 278Q308 296 308 320V440Q308 466 280 466H232Q204 466 204 440V320Q204 296 182 278Q154 255 154 220V120Q154 66 190 56Z" fill="#e0e3e8"/>
+    <path d="M194 68Q256 58 318 68Q346 78 346 120V216Q346 248 322 268Q296 288 296 315V435C296 448 280 448 274 430L268 415Q256 405 244 415L238 430C232 448 216 448 216 435V315Q216 288 190 268Q166 248 166 216V120Q166 78 194 68Z" fill="#1c2230"/>
+    <rect x="166" y="65" width="180" height="160" rx="16" fill="#0f1218"/>
+    <rect x="172" y="71" width="168" height="148" rx="12" fill="#5b0c8c"/>
+    <rect x="183" y="81" width="146" height="128" rx="14" fill="#9a139c"/>
+    <rect x="194" y="91" width="124" height="108" rx="16" fill="#db1e64"/>
+    <rect x="205" y="101" width="102" height="88" rx="18" fill="#f24e21"/>
+    <rect x="216" y="109" width="80" height="72" rx="18" fill="#f67b1b"/>
+    <rect x="228" y="119" width="56" height="52" rx="14" fill="#f9b017"/>
+    <rect x="240" y="129" width="32" height="32" rx="8" fill="#fcf01a"/>
+    <g transform="translate(0 8)">
+      <rect x="238" y="230" width="36" height="36" rx="8" fill="#e0e3e8"/>
+      <path d="M208 230H222Q226 230 226 234V242Q226 246 222 246H212Q208 246 207 242L203 234Q202 230 208 230Z" fill="#e0e3e8"/>
+      <path d="M304 230H290Q286 230 286 234V242Q286 246 290 246H300Q304 246 305 242L309 234Q310 230 304 230Z" fill="#e0e3e8"/>
+      <path d="M212 254H226Q230 254 230 258V266Q230 270 226 270H216Q212 270 211 266L207 258Q206 254 212 254Z" fill="#e0e3e8"/>
+      <path d="M300 254H286Q282 254 282 258V266Q282 270 286 270H296Q300 270 301 266L305 258Q306 254 300 254Z" fill="#e0e3e8"/>
+    </g>
+  </g>
+</svg>

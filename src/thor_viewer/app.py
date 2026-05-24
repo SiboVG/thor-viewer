@@ -3,6 +3,7 @@ import traceback
 
 from PySide6.QtWidgets import QApplication, QMessageBox
 
+from thor_viewer.gui.icons import app_icon
 from thor_viewer.gui.main_window import MainWindow
 from thor_viewer.gui.theme import APP_STYLESHEET
 
@@ -23,6 +24,7 @@ def install_exception_hook() -> None:
 def main() -> None:
     install_exception_hook()
     app = QApplication(sys.argv)
+    app.setWindowIcon(app_icon())
     app.setStyleSheet(APP_STYLESHEET)
 
     window = MainWindow()

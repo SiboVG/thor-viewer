@@ -5,7 +5,12 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QPushButton
 
 
-ICON_DIR = Path(__file__).resolve().parents[1] / "assets" / "lucide"
+ASSET_DIR = Path(__file__).resolve().parents[1] / "assets"
+ICON_DIR = ASSET_DIR / "lucide"
+
+
+def app_icon() -> QIcon:
+    return QIcon(str(ASSET_DIR / "app-icon.svg"))
 
 
 def lucide_icon(name: str) -> QIcon:
