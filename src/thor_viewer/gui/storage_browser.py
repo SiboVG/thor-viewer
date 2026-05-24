@@ -1,13 +1,25 @@
 from __future__ import annotations
 
+import shutil
 from collections import deque
 from pathlib import Path
 from threading import Event
 
-from PySide6.QtCore import QObject, QRunnable, Qt, QThreadPool, Signal, Slot, QTimer, QSize
+from PySide6.QtCore import (
+    QObject,
+    QRunnable,
+    QSettings,
+    QSize,
+    Qt,
+    QThreadPool,
+    QTimer,
+    Signal,
+    Slot,
+)
 from PySide6.QtGui import QColor, QIcon, QImageReader, QPainter, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QFileDialog,
     QHBoxLayout,
     QLabel,
     QListView,
@@ -33,6 +45,8 @@ THUMB_WIDTH = 180
 THUMB_HEIGHT = 135
 ITEM_WIDTH = THUMB_WIDTH + 44
 ITEM_HEIGHT = THUMB_HEIGHT + 78
+EXPORT_DIR_SETTING = "storage/export_dir"
+EXPORT_FILENAME_SETTING = "storage/export_filename"
 
 
 class TaskSignals(QObject):
@@ -144,6 +158,7 @@ class StorageBrowser(QWidget):
         self.current_refresh_task: RefreshTask | None = None
         self.current_sync_task: SyncMissingTask | None = None
         self.active = False
+        self.settings = QSettings("ThorViewer", "ThorViewer")
 
         self.thumbnail_timer = QTimer(self)
         self.thumbnail_timer.timeout.connect(self.load_next_thumbnail_batch)
@@ -156,9 +171,13 @@ class StorageBrowser(QWidget):
         self.analyse_button = QPushButton("Analyse selected")
         self.analyse_button.clicked.connect(self.analyse_selected)
 
+        self.save_button = QPushButton("Save selected...")
+        self.save_button.clicked.connect(self.save_selected)
+
         top = QHBoxLayout()
         top.addWidget(self.sync_button)
         top.addWidget(self.analyse_button)
+        top.addWidget(self.save_button)
         top.addStretch()
 
         self.grid = QListWidget()
@@ -224,6 +243,7 @@ class StorageBrowser(QWidget):
         self.status_label.setText("Syncing Thor SD card...")
         self.sync_button.setEnabled(False)
         self.analyse_button.setEnabled(False)
+        self.save_button.setEnabled(False)
         self.syncing = True
 
         task = RefreshTask()
@@ -240,6 +260,7 @@ class StorageBrowser(QWidget):
         self.selected_pair_obj = None
         self.rebuild_grid()
         self.analyse_button.setEnabled(True)
+        self.save_button.setEnabled(True)
 
         if not self.active:
             self.syncing = False
@@ -364,6 +385,7 @@ class StorageBrowser(QWidget):
         self.current_sync_task = None
         self.sync_button.setEnabled(True)
         self.analyse_button.setEnabled(True)
+        self.save_button.setEnabled(True)
 
         for pair, item in self.items_by_pair.items():
             item.setText(self.item_text(pair))
@@ -383,6 +405,7 @@ class StorageBrowser(QWidget):
         self.current_sync_task = None
         self.sync_button.setEnabled(True)
         self.analyse_button.setEnabled(True)
+        self.save_button.setEnabled(True)
         self.status_label.setText("Sync paused; open Storage to continue")
         self.sync_finished.emit()
 
@@ -456,6 +479,109 @@ class StorageBrowser(QWidget):
 
         self.analyse_pair(pair)
 
+    def save_selected(self) -> None:
+        pair = self.selected_pair()
+        if pair is None:
+            QMessageBox.information(self, "No selection", "Select a capture first.")
+            return
+
+        source_paths = self.local_pair_paths(pair)
+        expected_roles = self.expected_pair_roles(pair)
+        missing_roles = expected_roles - source_paths.keys()
+        if missing_roles:
+            QMessageBox.warning(
+                self,
+                "Not downloaded",
+                "The selected capture has not finished downloading yet.",
+            )
+            return
+
+        default_path = self.default_export_path(pair)
+        filename, _ = QFileDialog.getSaveFileName(
+            self,
+            "Save capture pair",
+            str(default_path),
+            "JPEG images (*.jpg *.jpeg);;All files (*)",
+        )
+
+        if not filename:
+            return
+
+        destination_path = Path(filename)
+        export_paths = self.export_paths_for_pair(destination_path, pair)
+        if not export_paths:
+            QMessageBox.warning(
+                self,
+                "Nothing to save",
+                "The selected capture has no IR or visual image.",
+            )
+            return
+
+        try:
+            for role, source_path in source_paths.items():
+                shutil.copy2(source_path, export_paths[role])
+        except Exception as exc:
+            QMessageBox.warning(self, "Save failed", str(exc))
+            return
+
+        self.settings.setValue(EXPORT_DIR_SETTING, str(destination_path.parent))
+        self.settings.setValue(EXPORT_FILENAME_SETTING, destination_path.name)
+        self.status_label.setText(
+            f"Saved {', '.join(export_paths[role].name for role in source_paths)}"
+        )
+
+    def expected_pair_roles(self, pair: CapturePair) -> set[str]:
+        roles: set[str] = set()
+
+        if pair.ir is not None:
+            roles.add("ir")
+
+        if pair.dc is not None:
+            roles.add("dc")
+
+        return roles
+
+    def local_pair_paths(self, pair: CapturePair) -> dict[str, Path]:
+        paths: dict[str, Path] = {}
+
+        for role, file in (("ir", pair.ir), ("dc", pair.dc)):
+            if file is None:
+                continue
+
+            path = DOWNLOAD_DIR / file.filename
+            if path.exists():
+                paths[role] = path
+
+        return paths
+
+    def default_export_path(self, pair: CapturePair) -> Path:
+        export_dir = Path(
+            self.settings.value(EXPORT_DIR_SETTING, str(Path.home()), str)
+        )
+        export_filename = self.settings.value(
+            EXPORT_FILENAME_SETTING,
+            f"{pair.base}.jpg",
+            str,
+        )
+        return export_dir / export_filename
+
+    @staticmethod
+    def export_paths_for_pair(
+        destination_path: Path,
+        pair: CapturePair,
+    ) -> dict[str, Path]:
+        suffix = destination_path.suffix or ".jpg"
+        base_path = destination_path.with_suffix("")
+        paths: dict[str, Path] = {}
+
+        if pair.ir is not None:
+            paths["ir"] = base_path.with_name(f"{base_path.name}-IR").with_suffix(suffix)
+
+        if pair.dc is not None:
+            paths["dc"] = base_path.with_name(f"{base_path.name}-DC").with_suffix(suffix)
+
+        return paths
+
     def analyse_pair(self, pair: CapturePair) -> None:
         if pair.ir is None:
             QMessageBox.warning(self, "No IR image", "This capture has no IR image.")
@@ -488,6 +614,7 @@ class StorageBrowser(QWidget):
         self.current_sync_task = None
         self.sync_button.setEnabled(True)
         self.analyse_button.setEnabled(True)
+        self.save_button.setEnabled(True)
 
         if not self.active:
             self.sync_finished.emit()
