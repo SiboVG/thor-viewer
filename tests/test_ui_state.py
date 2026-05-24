@@ -37,6 +37,13 @@ class UiStateTest(unittest.TestCase):
         self.assertTrue(browser.analyse_button.isEnabled())
         self.assertTrue(browser.save_button.isEnabled())
 
+        browser.syncing = True
+        browser.update_action_buttons()
+
+        self.assertFalse(browser.sync_button.isEnabled())
+        self.assertTrue(browser.analyse_button.isEnabled())
+        self.assertTrue(browser.save_button.isEnabled())
+
     def test_analysis_controls_are_disabled_until_image_is_loaded(self) -> None:
         viewer = RadiometricImageViewer()
 

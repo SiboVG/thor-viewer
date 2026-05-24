@@ -385,8 +385,8 @@ class StorageBrowser(QWidget):
     def update_action_buttons(self) -> None:
         has_selection = self.selected_pair_obj is not None
         self.sync_button.setEnabled(self.device_connected and not self.syncing)
-        self.analyse_button.setEnabled(has_selection and not self.syncing)
-        self.save_button.setEnabled(has_selection and not self.syncing)
+        self.analyse_button.setEnabled(has_selection)
+        self.save_button.setEnabled(has_selection)
 
     def on_download_progress(self, pair: CapturePair, paths: list[Path]) -> None:
         item = self.items_by_pair.get(pair)
