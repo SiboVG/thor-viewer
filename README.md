@@ -27,7 +27,8 @@ Screenshots below use generated demo data.
 - Python 3.10+
 - A ThermalMaster Thor camera
 - `uv` for dependency management
-- MTP command-line tools available on your platform (`mtp-files`, `mtp-getfile`) for SD-card sync
+- Windows uses the built-in portable-device bridge for SD-card sync
+- macOS/Linux SD-card sync requires MTP command-line tools (`mtp-files`, `mtp-getfile`)
 
 ## Run
 
@@ -47,6 +48,14 @@ If the Thor appears in Device Manager or Wireshark/USBPcap but Thor Viewer says 
 - Open Windows Settings > Privacy & security > Camera and enable camera access for desktop apps.
 - If you use Bitdefender or another antivirus/privacy tool, allow webcam/camera access for Thor Viewer, Python, or the terminal you use to run `uv run thor-viewer`.
 - Close other apps that may already be using the Thor camera, then restart Thor Viewer and press Refresh devices.
+
+### Windows: Storage tab cannot browse captures
+
+On Windows, the Storage tab uses the built-in portable-device bridge and should not need `mtp-files` or `mtp-getfile`. If the Thor appears in File Explorer but not in Thor Viewer, unplug and reconnect the camera, close other file-transfer apps, and restart Thor Viewer.
+
+### macOS/Linux: missing MTP tools
+
+On macOS and Linux, the Storage tab shells out to `mtp-files` and `mtp-getfile` for SD-card sync. Live view works without these tools, but SD-card browsing and sync need libmtp-compatible command-line tools on `PATH`. If they are not installed, copy captures with another MTP app for now.
 
 ## Development
 
@@ -69,7 +78,7 @@ open "dist/Thor Viewer.app"
 
 Run the same build command on Windows or Linux to create native PyInstaller artifacts for that OS. The script bundles app SVG assets, generates platform icons (`.icns` on macOS, `.ico` on Windows, hicolor PNG icons plus a `.desktop` file on Linux), and writes a zip or tarball in `dist/`.
 
-PyInstaller is not a cross-compiler, so build each release on the target OS. SD-card sync still requires `mtp-files` and `mtp-getfile` to be installed on the target system.
+PyInstaller is not a cross-compiler, so build each release on the target OS. On Windows, SD-card sync uses built-in portable-device support. On macOS and Linux, SD-card sync still requires `mtp-files` and `mtp-getfile` to be installed on the target system.
 
 ## Status
 
