@@ -10,6 +10,16 @@ Thor Viewer is an open-source, cross-platform desktop alternative to Thermal Mas
 - Analysis tab for downloaded IR captures
 - Python/PySide6 app intended to run on macOS, Linux, and Windows
 
+## Screenshots
+
+Screenshots below use generated demo data.
+
+![Live view](docs/screenshots/live-view.png)
+
+![Storage browser](docs/screenshots/storage.png)
+
+![Analysis view](docs/screenshots/analysis.png)
+
 ## Requirements
 
 - Python 3.10+
