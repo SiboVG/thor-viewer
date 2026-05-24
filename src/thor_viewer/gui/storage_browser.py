@@ -158,12 +158,14 @@ class StorageBrowser(QWidget):
         self.current_refresh_task: RefreshTask | None = None
         self.current_sync_task: SyncMissingTask | None = None
         self.active = False
+        self.device_connected = False
         self.settings = QSettings("ThorViewer", "ThorViewer")
 
         self.thumbnail_timer = QTimer(self)
         self.thumbnail_timer.timeout.connect(self.load_next_thumbnail_batch)
 
         self.status_label = QLabel("Open Storage to sync Thor SD card")
+        self.status_label.setObjectName("statusLabel")
 
         self.sync_button = QPushButton("Sync SD card")
         self.sync_button.clicked.connect(self.sync)
@@ -173,8 +175,11 @@ class StorageBrowser(QWidget):
 
         self.save_button = QPushButton("Save selected...")
         self.save_button.clicked.connect(self.save_selected)
+        self.update_action_buttons()
 
         top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(8)
         top.addWidget(self.sync_button)
         top.addWidget(self.analyse_button)
         top.addWidget(self.save_button)
@@ -197,27 +202,10 @@ class StorageBrowser(QWidget):
         self.grid.setTextElideMode(Qt.ElideRight)
         self.grid.itemSelectionChanged.connect(self.on_selection_changed)
         self.grid.itemDoubleClicked.connect(self.analyse_item)
-        self.grid.setStyleSheet(
-            """
-            QListWidget {
-                background: transparent;
-                border: none;
-            }
-            QListWidget::item {
-                color: white;
-                background: #111827;
-                border: 1px solid #555;
-                border-radius: 8px;
-                padding: 10px;
-            }
-            QListWidget::item:selected {
-                background: #1f2937;
-                border: 2px solid #3b82f6;
-            }
-            """
-        )
 
         layout = QVBoxLayout()
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         layout.addLayout(top)
         layout.addWidget(self.grid)
         layout.addWidget(self.status_label)
@@ -226,6 +214,11 @@ class StorageBrowser(QWidget):
 
     def activate(self) -> None:
         self.active = True
+        if not self.device_connected:
+            self.status_label.setText("Connect a Thor device to sync the SD card")
+            self.update_action_buttons()
+            return
+
         if not self.has_synced and not self.syncing:
             self.sync()
 
@@ -237,14 +230,15 @@ class StorageBrowser(QWidget):
             self.current_sync_task.cancel()
 
     def sync(self) -> None:
-        if self.syncing:
+        if self.syncing or not self.device_connected:
+            if not self.device_connected:
+                self.status_label.setText("Connect a Thor device to sync the SD card")
+                self.update_action_buttons()
             return
 
         self.status_label.setText("Syncing Thor SD card...")
-        self.sync_button.setEnabled(False)
-        self.analyse_button.setEnabled(False)
-        self.save_button.setEnabled(False)
         self.syncing = True
+        self.update_action_buttons()
 
         task = RefreshTask()
         self.current_refresh_task = task
@@ -259,12 +253,11 @@ class StorageBrowser(QWidget):
         self.pairs = pairs
         self.selected_pair_obj = None
         self.rebuild_grid()
-        self.analyse_button.setEnabled(True)
-        self.save_button.setEnabled(True)
+        self.update_action_buttons()
 
         if not self.active:
             self.syncing = False
-            self.sync_button.setEnabled(True)
+            self.update_action_buttons()
             self.status_label.setText("Sync paused; open Storage to continue")
             self.sync_finished.emit()
             return
@@ -360,14 +353,36 @@ class StorageBrowser(QWidget):
         selected_items = self.grid.selectedItems()
         if not selected_items:
             self.selected_pair_obj = None
+            self.update_action_buttons()
             return
 
         pair = selected_items[0].data(Qt.UserRole)
         self.selected_pair_obj = pair
         self.status_label.setText(f"Selected {pair.base}")
+        self.update_action_buttons()
 
     def selected_pair(self) -> CapturePair | None:
         return self.selected_pair_obj
+
+    def set_device_connected(self, connected: bool) -> None:
+        self.device_connected = connected
+        if not connected:
+            if self.current_refresh_task is not None:
+                self.current_refresh_task.cancel()
+            if self.current_sync_task is not None:
+                self.current_sync_task.cancel()
+            self.syncing = False
+            self.current_refresh_task = None
+            self.current_sync_task = None
+            self.status_label.setText("Connect a Thor device to sync the SD card")
+
+        self.update_action_buttons()
+
+    def update_action_buttons(self) -> None:
+        has_selection = self.selected_pair_obj is not None
+        self.sync_button.setEnabled(self.device_connected and not self.syncing)
+        self.analyse_button.setEnabled(has_selection and not self.syncing)
+        self.save_button.setEnabled(has_selection and not self.syncing)
 
     def on_download_progress(self, pair: CapturePair, paths: list[Path]) -> None:
         item = self.items_by_pair.get(pair)
@@ -383,9 +398,7 @@ class StorageBrowser(QWidget):
         self.has_synced = True
         self.syncing = False
         self.current_sync_task = None
-        self.sync_button.setEnabled(True)
-        self.analyse_button.setEnabled(True)
-        self.save_button.setEnabled(True)
+        self.update_action_buttons()
 
         for pair, item in self.items_by_pair.items():
             item.setText(self.item_text(pair))
@@ -403,9 +416,7 @@ class StorageBrowser(QWidget):
         self.syncing = False
         self.current_refresh_task = None
         self.current_sync_task = None
-        self.sync_button.setEnabled(True)
-        self.analyse_button.setEnabled(True)
-        self.save_button.setEnabled(True)
+        self.update_action_buttons()
         self.status_label.setText("Sync paused; open Storage to continue")
         self.sync_finished.emit()
 
@@ -612,9 +623,7 @@ class StorageBrowser(QWidget):
         self.status_label.setText(message)
         self.syncing = False
         self.current_sync_task = None
-        self.sync_button.setEnabled(True)
-        self.analyse_button.setEnabled(True)
-        self.save_button.setEnabled(True)
+        self.update_action_buttons()
 
         if not self.active:
             self.sync_finished.emit()

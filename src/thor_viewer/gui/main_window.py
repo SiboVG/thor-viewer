@@ -63,9 +63,12 @@ class MainWindow(QWidget):
         self.connected_device_id: str | None = None
 
         self.image_label = QLabel()
+        self.image_label.setObjectName("imageSurface")
         self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setMinimumSize(640, 360)
 
         self.device_combo = QComboBox()
+        self.device_combo.setMinimumWidth(220)
         self.refresh_devices_button = QPushButton("Refresh devices")
         self.refresh_devices_button.clicked.connect(self.refresh_camera_devices)
 
@@ -84,10 +87,15 @@ class MainWindow(QWidget):
         self.record_button.clicked.connect(self.toggle_recording)
 
         buttons = QHBoxLayout()
+        buttons.setContentsMargins(0, 0, 0, 0)
+        buttons.setSpacing(8)
         buttons.addWidget(self.snapshot_button)
         buttons.addWidget(self.record_button)
+        buttons.addStretch()
 
         device_controls = QHBoxLayout()
+        device_controls.setContentsMargins(0, 0, 0, 0)
+        device_controls.setSpacing(8)
         device_controls.addWidget(QLabel("Device"))
         device_controls.addWidget(self.device_combo)
         device_controls.addWidget(self.refresh_devices_button)
@@ -98,8 +106,10 @@ class MainWindow(QWidget):
 
         self.live_widget = QWidget()
         live_layout = QVBoxLayout()
+        live_layout.setContentsMargins(12, 12, 12, 12)
+        live_layout.setSpacing(10)
         live_layout.addLayout(device_controls)
-        live_layout.addWidget(self.image_label)
+        live_layout.addWidget(self.image_label, 1)
         live_layout.addLayout(buttons)
         self.live_widget.setLayout(live_layout)
 
@@ -116,6 +126,8 @@ class MainWindow(QWidget):
         self.tabs.currentChanged.connect(self.on_tab_changed)
 
         main_layout = QVBoxLayout()
+        main_layout.setContentsMargins(12, 12, 12, 12)
+        main_layout.setSpacing(0)
         main_layout.addWidget(self.tabs)
         self.setLayout(main_layout)
 
@@ -196,6 +208,13 @@ class MainWindow(QWidget):
             self.device_combo.setCurrentIndex(combo_index)
 
         self.device_combo.blockSignals(False)
+        self.update_storage_device_state()
+
+    def update_storage_device_state(self) -> None:
+        if hasattr(self, "storage_browser"):
+            self.storage_browser.set_device_connected(
+                self.selected_camera_device() is not None
+            )
 
     @staticmethod
     def is_thor_camera_device(device) -> bool:

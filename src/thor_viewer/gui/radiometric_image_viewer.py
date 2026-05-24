@@ -110,6 +110,7 @@ class RadiometricImageViewer(QWidget):
         self.alignment_controls = QWidget()
         alignment_layout = QHBoxLayout()
         alignment_layout.setContentsMargins(0, 0, 0, 0)
+        alignment_layout.setSpacing(8)
         alignment_layout.addWidget(QLabel("Visual offset"))
         alignment_layout.addWidget(QLabel("X"))
         alignment_layout.addWidget(self.offset_x_spin)
@@ -138,6 +139,9 @@ class RadiometricImageViewer(QWidget):
 
         self.image_label = ImageDisplayLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setText(
+            "Open an image from a file\nor double-click a capture in Storage"
+        )
         self.image_label.setMouseTracking(True)
         self.image_label.setMinimumSize(1, 1)
         self.image_label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
@@ -157,9 +161,12 @@ class RadiometricImageViewer(QWidget):
         self.image_scroll.viewport().installEventFilter(self)
 
         self.info_label = QLabel("Open a radiometric IR image")
+        self.info_label.setObjectName("statusLabel")
         self.info_label.setAlignment(Qt.AlignLeft)
 
         controls_layout = QHBoxLayout()
+        controls_layout.setContentsMargins(0, 0, 0, 0)
+        controls_layout.setSpacing(8)
         controls_layout.addWidget(self.open_button)
         controls_layout.addWidget(self.overlay_button)
         controls_layout.addWidget(self.split_button)
@@ -179,11 +186,27 @@ class RadiometricImageViewer(QWidget):
         controls_layout.addStretch()
 
         layout = QVBoxLayout()
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
         layout.addLayout(controls_layout)
         layout.addWidget(self.alignment_controls)
         layout.addWidget(self.image_scroll, 1)
         layout.addWidget(self.info_label)
         self.setLayout(layout)
+
+        self.image_controls = [
+            self.overlay_button,
+            self.split_button,
+            self.blend_slider,
+            self.align_button,
+            self.zoom_out_button,
+            self.zoom_in_button,
+            self.fit_button,
+            self.offset_x_spin,
+            self.offset_y_spin,
+            self.reset_offset_button,
+        ]
+        self.update_image_loaded_ui()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -247,6 +270,7 @@ class RadiometricImageViewer(QWidget):
         self.zoom_factor = 1.0
         self.update_blend_controls()
         self.update_alignment_controls()
+        self.update_image_loaded_ui()
         self.update_preview()
 
         tmin = self.image.min_temperature()
@@ -291,6 +315,7 @@ class RadiometricImageViewer(QWidget):
 
     def update_preview(self) -> None:
         if self.ir_preview_image is None:
+            self.update_image_loaded_ui()
             return
 
         self.update_blend_controls()
@@ -496,7 +521,9 @@ class RadiometricImageViewer(QWidget):
 
     def update_blend_controls(self) -> None:
         self.blend_slider.setEnabled(
-            self.visual_image is not None and self.overlay_button.isChecked()
+            self.ir_preview_image is not None
+            and self.visual_image is not None
+            and self.overlay_button.isChecked()
         )
 
     def update_alignment_controls(self, checked: bool | None = None) -> None:
@@ -519,7 +546,11 @@ class RadiometricImageViewer(QWidget):
         self.update_alignment_controls()
 
     def can_align_visual(self) -> bool:
-        return self.visual_image is not None and self.overlay_button.isChecked()
+        return (
+            self.ir_preview_image is not None
+            and self.visual_image is not None
+            and self.overlay_button.isChecked()
+        )
 
     def should_drag_visual(self) -> bool:
         return self.can_align_visual() and self.align_button.isChecked()
@@ -537,6 +568,23 @@ class RadiometricImageViewer(QWidget):
 
     def update_visual_offset_from_controls(self, value: int | None = None) -> None:
         self.set_visual_offset(self.offset_x_spin.value(), self.offset_y_spin.value())
+
+    def update_image_loaded_ui(self) -> None:
+        image_loaded = self.ir_preview_image is not None
+
+        for control in self.image_controls:
+            control.setEnabled(image_loaded)
+
+        self.update_blend_controls()
+        self.update_alignment_controls()
+
+        if not image_loaded:
+            self.alignment_controls.setVisible(False)
+            self.image_label.clear()
+            self.image_label.setText(
+                "Open an image from a file\nor double-click a capture in Storage"
+            )
+            self.info_label.setText("Open a radiometric IR image")
 
     def reset_visual_offset(self) -> None:
         self.set_visual_offset(0, 0)
