@@ -35,6 +35,20 @@ uv run python -m compileall src scripts main.py
 
 The helper scripts in `scripts/` are for MTP and radiometric JPEG inspection. Downloaded captures, recordings, snapshots, virtual environments, and local IDE files are ignored by git.
 
+## Package
+
+On macOS, build a `.app` bundle with:
+
+```bash
+uv sync --group build
+uv run --group build python scripts/build_app.py
+open "dist/Thor Viewer.app"
+```
+
+Run the same build command on Windows or Linux to create native PyInstaller artifacts for that OS. The script bundles app SVG assets, generates platform icons (`.icns` on macOS, `.ico` on Windows, hicolor PNG icons plus a `.desktop` file on Linux), and writes a zip or tarball in `dist/`.
+
+PyInstaller is not a cross-compiler, so build each release on the target OS. SD-card sync still requires `mtp-files` and `mtp-getfile` to be installed on the target system.
+
 ## Status
 
 This project is early-stage and reverse-engineered from observed Thor camera files and device behavior. ThermalMaster is a trademark of its owner; this project is independent and not affiliated with ThermalMaster.

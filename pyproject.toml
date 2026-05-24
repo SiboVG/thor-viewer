@@ -12,6 +12,12 @@ dependencies = [
     "pyside6",
 ]
 
+[dependency-groups]
+build = [
+    "pillow>=10.0",
+    "pyinstaller>=6.0",
+]
+
 [project.scripts]
 thor-viewer = "thor_viewer.app:main"
 
