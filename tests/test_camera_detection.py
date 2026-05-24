@@ -1,9 +1,11 @@
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 
 from thor_viewer.gui.main_window import MainWindow
+from thor_viewer.backend.usbpcap_temperature_capture import UsbPcapLiveTemperatureCapture
 
 
 class FakeCameraDevice:
@@ -70,6 +72,50 @@ class CameraDetectionTest(unittest.TestCase):
         with patch("thor_viewer.gui.main_window.platform.system", return_value="Darwin"):
             self.assertFalse(window.should_use_opencv_live_camera())
 
+    def test_live_temperature_probe_is_opt_in(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with patch.dict("thor_viewer.gui.main_window.os.environ", {}, clear=True):
+            self.assertFalse(window.should_probe_opencv_live_temperature())
+
+        with patch.dict(
+            "thor_viewer.gui.main_window.os.environ",
+            {"THOR_PROBE_LIVE_TEMPERATURE": "1"},
+            clear=True,
+        ):
+            self.assertTrue(window.should_probe_opencv_live_temperature())
+
+    def test_live_temperature_pcap_file_source_is_opt_in(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with patch.dict("thor_viewer.gui.main_window.os.environ", {}, clear=True):
+            self.assertIsNone(window.live_temperature_pcap_path())
+
+        with patch.dict(
+            "thor_viewer.gui.main_window.os.environ",
+            {"THOR_LIVE_TEMPERATURE_PCAP": "C:\\Temp\\thor-live.pcapng"},
+            clear=True,
+        ):
+            self.assertEqual(
+                window.live_temperature_pcap_path(),
+                Path("C:\\Temp\\thor-live.pcapng"),
+            )
+
+    def test_usbpcap_file_source_takes_precedence_over_opencv_probe(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with patch.dict(
+            "thor_viewer.gui.main_window.os.environ",
+            {
+                "THOR_LIVE_TEMPERATURE_PCAP": "C:\\Temp\\thor-live.pcapng",
+                "THOR_PROBE_LIVE_TEMPERATURE": "1",
+            },
+            clear=True,
+        ):
+            capture = window.create_live_temperature_capture(0, 1)
+
+        self.assertIsInstance(capture, UsbPcapLiveTemperatureCapture)
+
     def test_camera_index_for_device_uses_qt_device_order(self) -> None:
         window = MainWindow.__new__(MainWindow)
         webcam = FakeCameraDevice("External Webcam", b"webcam-id")
@@ -83,6 +129,26 @@ class CameraDetectionTest(unittest.TestCase):
             return_value=[webcam, thor],
         ):
             self.assertEqual(window.camera_index_for_device(thor), 1)
+
+    def test_live_temperature_candidates_prefer_adjacent_interfaces(self) -> None:
+        self.assertEqual(
+            MainWindow.live_temperature_candidate_indices(2),
+            [3, 4, 1, 0, 2],
+        )
+        self.assertEqual(
+            MainWindow.live_temperature_candidate_indices(0),
+            [1, 2, 0],
+        )
+
+    def test_live_temperature_candidates_stay_inside_device_count(self) -> None:
+        self.assertEqual(
+            MainWindow.live_temperature_candidate_indices(0, device_count=1),
+            [0],
+        )
+        self.assertEqual(
+            MainWindow.live_temperature_candidate_indices(1, device_count=3),
+            [2, 0, 1],
+        )
 
     def test_has_active_camera_accepts_qt_or_opencv_backend(self) -> None:
         window = MainWindow.__new__(MainWindow)

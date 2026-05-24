@@ -1,6 +1,8 @@
 from datetime import datetime
+import os
 import platform
 import re
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -14,6 +16,7 @@ from PySide6.QtMultimedia import (
 )
 from PySide6.QtWidgets import (
     QComboBox,
+    QFileDialog,
     QLabel,
     QHBoxLayout,
     QPushButton,
@@ -23,7 +26,14 @@ from PySide6.QtWidgets import (
 )
 
 from thor_viewer.backend.camera import UvcCamera
+from thor_viewer.backend.live_temperature import (
+    LiveTemperatureFrame,
+    parse_live_temperature_packet,
+    preview_to_thermal_xy,
+)
+from thor_viewer.backend.live_temperature_capture import OpenCvLiveTemperatureCapture
 from thor_viewer.backend.recorder import VideoRecorder
+from thor_viewer.backend.usbpcap_temperature_capture import UsbPcapLiveTemperatureCapture
 from thor_viewer.config.settings import (
     CAPTURE_DIR,
     FPS,
@@ -56,6 +66,11 @@ class MainWindow(QWidget):
 
         self.camera: QCamera | None = None
         self.opencv_camera: UvcCamera | None = None
+        self.live_temperature_capture: (
+            OpenCvLiveTemperatureCapture
+            | UsbPcapLiveTemperatureCapture
+            | None
+        ) = None
         self.opencv_frame_timer = QTimer(self)
         self.opencv_frame_timer.timeout.connect(self.poll_opencv_camera)
         self.last_opencv_sequence = 0
@@ -71,17 +86,28 @@ class MainWindow(QWidget):
         self.reported_camera_error: str | None = None
         self.dark_frame_count = 0
         self.connected_device_id: str | None = None
+        self.latest_live_temperature_frame: LiveTemperatureFrame | None = None
+        self.latest_live_hover_preview_xy: tuple[int, int] | None = None
 
         self.image_label = QLabel()
         self.image_label.setObjectName("imageSurface")
         self.image_label.setAlignment(Qt.AlignCenter)
         self.image_label.setMinimumSize(640, 360)
+        self.image_label.setMouseTracking(True)
+        self.image_label.mouseMoveEvent = self.on_live_mouse_move
+        self.image_label.leaveEvent = self.on_live_mouse_leave
 
         self.device_combo = QComboBox()
         self.device_combo.setMinimumWidth(220)
         self.refresh_devices_button = QPushButton("Refresh devices")
         set_button_icon(self.refresh_devices_button, "refresh-cw")
         self.refresh_devices_button.clicked.connect(self.refresh_camera_devices)
+
+        self.live_temperature_file_button = QPushButton("Load temp capture")
+        set_button_icon(self.live_temperature_file_button, "folder-open")
+        self.live_temperature_file_button.clicked.connect(
+            self.select_live_temperature_capture_file
+        )
 
         self.connect_button = QPushButton("Connect")
         set_button_icon(self.connect_button, "plug")
@@ -101,6 +127,9 @@ class MainWindow(QWidget):
         set_button_icon(self.record_button, "video")
         self.record_button.clicked.connect(self.toggle_recording)
 
+        self.live_temperature_label = QLabel("Hover live image for temperature")
+        self.live_temperature_label.setObjectName("statusLabel")
+
         buttons = QHBoxLayout()
         buttons.setContentsMargins(0, 0, 0, 0)
         buttons.setSpacing(8)
@@ -114,6 +143,7 @@ class MainWindow(QWidget):
         device_controls.addWidget(QLabel("Device"))
         device_controls.addWidget(self.device_combo)
         device_controls.addWidget(self.refresh_devices_button)
+        device_controls.addWidget(self.live_temperature_file_button)
         device_controls.addWidget(self.connect_button)
         device_controls.addWidget(self.disconnect_button)
         device_controls.addWidget(self.camera_status_label)
@@ -125,6 +155,7 @@ class MainWindow(QWidget):
         live_layout.setSpacing(10)
         live_layout.addLayout(device_controls)
         live_layout.addWidget(self.image_label, 1)
+        live_layout.addWidget(self.live_temperature_label)
         live_layout.addLayout(buttons)
         self.live_widget.setLayout(live_layout)
 
@@ -173,6 +204,7 @@ class MainWindow(QWidget):
 
         self.last_frame_sequence += 1
         self.last_frame = frame
+        self.update_live_temperature_from_frame(frame)
 
         if self.recorder.is_recording:
             self.recorder.write(frame)
@@ -296,6 +328,29 @@ class MainWindow(QWidget):
         )
         self.set_camera_connected_ui(False, status)
 
+    def select_live_temperature_capture_file(self) -> None:
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Thor USBPcap capture",
+            str(Path.home()),
+            "Capture files (*.pcap *.pcapng);;All files (*)",
+        )
+        if not file_path:
+            return
+
+        self.set_live_temperature_capture_file(Path(file_path))
+
+    def set_live_temperature_capture_file(self, path: Path) -> None:
+        self.latest_live_temperature_frame = None
+
+        capture = getattr(self, "live_temperature_capture", None)
+        if capture is not None:
+            capture.close()
+
+        self.live_temperature_capture = UsbPcapLiveTemperatureCapture(path)
+        self.live_temperature_capture.open()
+        self.live_temperature_label.setText(self.live_temperature_idle_text())
+
     def selected_camera_device(self):
         if not hasattr(self, "device_combo"):
             return None
@@ -322,6 +377,7 @@ class MainWindow(QWidget):
         self.reported_camera_error = None
         self.dark_frame_count = 0
         self.connected_device_id = None
+        self.reset_live_temperature_state()
         self.image_label.clear()
         self.image_label.setText("Camera disconnected")
         self.set_camera_connected_ui(False, "Camera disconnected")
@@ -339,6 +395,7 @@ class MainWindow(QWidget):
         self.reported_camera_error = message
         self.dark_frame_count = 0
         self.connected_device_id = None
+        self.reset_live_temperature_state()
         self.close_camera()
         self.image_label.clear()
         self.image_label.setText(message)
@@ -359,6 +416,128 @@ class MainWindow(QWidget):
         )
 
         self.image_label.setPixmap(QPixmap.fromImage(image))
+
+    def reset_live_temperature_state(self) -> None:
+        self.latest_live_temperature_frame = None
+        self.latest_live_hover_preview_xy = None
+        if hasattr(self, "live_temperature_label"):
+            self.live_temperature_label.setText(self.live_temperature_idle_text())
+
+    def update_live_temperature_from_frame(self, frame) -> None:
+        temperature_frame = self.parse_live_temperature_from_frame(frame)
+        if temperature_frame is None:
+            return
+
+        self.latest_live_temperature_frame = temperature_frame
+        if self.latest_live_hover_preview_xy is not None:
+            self.update_live_temperature_label(self.latest_live_hover_preview_xy)
+
+    def parse_live_temperature_from_frame(
+        self,
+        frame: np.ndarray,
+    ) -> LiveTemperatureFrame | None:
+        try:
+            temperature_frame = parse_live_temperature_packet(frame.tobytes())
+        except ValueError:
+            return None
+
+        if not self.is_plausible_live_temperature_frame(temperature_frame):
+            return None
+
+        return temperature_frame
+
+    @staticmethod
+    def is_plausible_live_temperature_frame(frame: LiveTemperatureFrame) -> bool:
+        valid = frame.valid_temperature_values()
+        return valid.size >= int(frame.k10.size * 0.8)
+
+    def on_live_mouse_move(self, event) -> None:
+        preview_xy = self.live_preview_xy_from_label_position(event.position())
+        self.update_live_temperature_label(preview_xy)
+        event.accept()
+
+    def on_live_mouse_leave(self, event) -> None:
+        self.latest_live_hover_preview_xy = None
+        self.live_temperature_label.setText("Hover live image for temperature")
+        event.accept()
+
+    def live_preview_xy_from_label_position(self, position) -> tuple[int, int] | None:
+        pixmap = self.image_label.pixmap()
+        frame = self.last_frame
+        if pixmap is None or frame is None:
+            return None
+
+        pixmap_width = pixmap.width()
+        pixmap_height = pixmap.height()
+        if pixmap_width <= 0 or pixmap_height <= 0:
+            return None
+
+        left = (self.image_label.width() - pixmap_width) / 2
+        top = (self.image_label.height() - pixmap_height) / 2
+        pixmap_x = float(position.x()) - left
+        pixmap_y = float(position.y()) - top
+
+        if (
+            pixmap_x < 0
+            or pixmap_y < 0
+            or pixmap_x >= pixmap_width
+            or pixmap_y >= pixmap_height
+        ):
+            return None
+
+        frame_height, frame_width = frame.shape[:2]
+        preview_x = round(pixmap_x * (frame_width - 1) / max(1, pixmap_width - 1))
+        preview_y = round(pixmap_y * (frame_height - 1) / max(1, pixmap_height - 1))
+
+        return (
+            min(frame_width - 1, max(0, preview_x)),
+            min(frame_height - 1, max(0, preview_y)),
+        )
+
+    def update_live_temperature_label(
+        self,
+        preview_xy: tuple[int, int] | None,
+    ) -> None:
+        self.latest_live_hover_preview_xy = preview_xy
+        if preview_xy is None:
+            self.live_temperature_label.setText("Hover live image for temperature")
+            return
+
+        preview_x, preview_y = preview_xy
+        frame = self.last_frame
+        if frame is None:
+            self.live_temperature_label.setText("No live frame")
+            return
+
+        frame_height, frame_width = frame.shape[:2]
+        thermal_x, thermal_y = preview_to_thermal_xy(
+            preview_x,
+            preview_y,
+            frame_width,
+            frame_height,
+        )
+
+        temperature_frame = self.latest_live_temperature_frame
+        if temperature_frame is None:
+            self.live_temperature_label.setText(
+                f"preview=({preview_x}, {preview_y}) | "
+                f"thermal=({thermal_x}, {thermal_y}) | "
+                f"temperature data unavailable | {self.live_temperature_idle_text()}"
+            )
+            return
+
+        temperature = temperature_frame.temperature_at_preview_xy(
+            preview_x,
+            preview_y,
+            frame_width,
+            frame_height,
+        )
+        temperature_text = "N/A" if temperature is None else f"{temperature:.2f} C"
+        self.live_temperature_label.setText(
+            f"preview=({preview_x}, {preview_y}) | "
+            f"thermal=({thermal_x}, {thermal_y}) | "
+            f"temperature={temperature_text}"
+        )
 
     def is_nearly_black_frame(self, frame) -> bool:
         return frame.mean() < 2 and frame.std() < 3
@@ -420,11 +599,18 @@ class MainWindow(QWidget):
                 return
 
             self.opencv_camera = opencv_camera
+            self.live_temperature_capture = self.create_live_temperature_capture(
+                camera_index,
+                len(QMediaDevices.videoInputs()),
+            )
+            if self.live_temperature_capture is not None:
+                self.live_temperature_capture.open()
             self.last_opencv_sequence = 0
             self.opencv_frame_timer.start(max(1, round(1000 / FPS)))
             self.last_frame_sequence = 0
             self.reported_camera_error = None
             self.dark_frame_count = 0
+            self.reset_live_temperature_state()
             self.connected_device_id = self.normalized_camera_device_id(selected_device)
             self.set_camera_connected_ui(True, self.connected_camera_status())
             return
@@ -437,6 +623,7 @@ class MainWindow(QWidget):
         self.last_frame_sequence = 0
         self.reported_camera_error = None
         self.dark_frame_count = 0
+        self.reset_live_temperature_state()
         self.connected_device_id = self.normalized_camera_device_id(selected_device)
         self.set_camera_connected_ui(True, self.connected_camera_status())
 
@@ -462,10 +649,31 @@ class MainWindow(QWidget):
 
         sequence, frame = latest
         if sequence == self.last_opencv_sequence:
+            self.update_live_temperature_from_capture()
             return
 
         self.last_opencv_sequence = sequence
+        self.update_live_temperature_from_capture()
         self.handle_camera_frame(frame)
+
+    def update_live_temperature_from_capture(self) -> None:
+        capture = self.live_temperature_capture
+        if capture is None:
+            return
+
+        temperature_frame = capture.latest_frame
+        if temperature_frame is None:
+            if self.latest_live_hover_preview_xy is None:
+                self.live_temperature_label.setText(self.live_temperature_idle_text())
+            else:
+                self.update_live_temperature_label(self.latest_live_hover_preview_xy)
+            return
+
+        self.latest_live_temperature_frame = temperature_frame
+        if self.latest_live_hover_preview_xy is not None:
+            self.update_live_temperature_label(self.latest_live_hover_preview_xy)
+        else:
+            self.live_temperature_label.setText("Temperature stream ready; hover live image")
 
     def has_active_camera(self) -> bool:
         return (
@@ -476,6 +684,51 @@ class MainWindow(QWidget):
     def should_use_opencv_live_camera(self) -> bool:
         return platform.system() == "Windows"
 
+    def should_probe_opencv_live_temperature(self) -> bool:
+        return os.environ.get("THOR_PROBE_LIVE_TEMPERATURE") == "1"
+
+    def create_live_temperature_capture(
+        self,
+        camera_index: int,
+        device_count: int,
+    ) -> OpenCvLiveTemperatureCapture | UsbPcapLiveTemperatureCapture | None:
+        usbpcap_path = self.live_temperature_pcap_path()
+        if usbpcap_path is not None:
+            return UsbPcapLiveTemperatureCapture(usbpcap_path)
+
+        if self.should_probe_opencv_live_temperature():
+            return OpenCvLiveTemperatureCapture(
+                self.live_temperature_candidate_indices(camera_index, device_count),
+                WIDTH,
+                HEIGHT,
+                FPS,
+            )
+
+        return None
+
+    def live_temperature_pcap_path(self) -> Path | None:
+        raw_path = os.environ.get("THOR_LIVE_TEMPERATURE_PCAP")
+        if not raw_path:
+            return None
+
+        return Path(raw_path)
+
+    def live_temperature_idle_text(self) -> str:
+        capture = getattr(self, "live_temperature_capture", None)
+        if capture is None:
+            return "Hover live image for temperature"
+
+        status = getattr(capture, "status", None)
+        if status is None:
+            return "Temperature stream probing; hover live image"
+
+        return (
+            f"Temperature: {status.message} | "
+            f"bytes={status.bytes_read} | "
+            f"marker={'yes' if status.marker_seen else 'no'} | "
+            f"frame={'yes' if status.frame_seen else 'no'}"
+        )
+
     def camera_index_for_device(self, selected_device) -> int:
         selected_id = self.normalized_camera_device_id(selected_device)
         for index, device in enumerate(QMediaDevices.videoInputs()):
@@ -483,6 +736,26 @@ class MainWindow(QWidget):
                 return index
 
         return 0
+
+    @staticmethod
+    def live_temperature_candidate_indices(
+        camera_index: int,
+        device_count: int | None = None,
+    ) -> list[int]:
+        candidates = [
+            camera_index + 1,
+            camera_index + 2,
+            camera_index - 1,
+            camera_index - 2,
+            camera_index,
+        ]
+        return list(
+            dict.fromkeys(
+                index
+                for index in candidates
+                if index >= 0 and (device_count is None or index < device_count)
+            )
+        )
 
     def connected_camera_status(self) -> str:
         device_name = self.device_combo.currentText()
@@ -511,6 +784,11 @@ class MainWindow(QWidget):
             self.opencv_frame_timer.stop()
         if opencv_camera is not None:
             opencv_camera.close()
+
+        live_temperature_capture = getattr(self, "live_temperature_capture", None)
+        self.live_temperature_capture = None
+        if live_temperature_capture is not None:
+            live_temperature_capture.close()
 
         if camera is None:
             return
