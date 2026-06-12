@@ -178,6 +178,16 @@ def celsius_from_k10(k10: np.ndarray) -> np.ndarray:
     return np.asarray(k10, dtype=np.float32) / 10.0 - 273.15
 
 
+def is_plausible_live_temperature_frame(
+    frame: LiveTemperatureFrame,
+    min_valid_fraction: float = 0.8,
+) -> bool:
+    """Heuristic guard against misparsed data: a real temperature frame has
+    almost all pixels inside the camera's measurable range."""
+    valid = frame.valid_temperature_values()
+    return valid.size >= int(frame.k10.size * min_valid_fraction)
+
+
 def preview_to_thermal_xy(
     x: int,
     y: int,

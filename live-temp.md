@@ -1,60 +1,111 @@
-Live Temperature Findings
+# Thor Live Temperature — Reverse Engineering Notes
 
-  We confirmed the Thor live video path and the live temperature path are separate from the app’s normal decoded video
-  frames.
+## USB topology (from `thor_live.pcapng`, USBPcap)
 
-  The app can show live video via Windows/OpenCV, but the decoded frames do not contain usable radiometric data. The
-  live temperature payload was found in USB traffic captured with Wireshark/USBPcap.
+The Thor enumerates as a composite USB device, VID `0x1d6b` PID `0x1102`
+(generic Linux-gadget IDs; the camera runs a Linux SoC):
 
-  Captured Packet Format
-  From the working thor_packet.txt / USBPcap capture:
+| Interface | Class | Purpose |
+| --- | --- | --- |
+| 0 + 1 | CDC-ACM (protocol 0xFF), EP 0x82 int, EP 0x81/0x01 bulk | Vendor serial command channel (TM THOR's `Uart_Read`/`Uart_Write`) |
+| 2 | Still Image 6/1/1, EP 0x83/0x02 bulk, EP 0x84 int | MTP (SD-card sync) |
+| 3 | UVC VideoControl | Camera terminal, processing unit, **Extension Unit ID 4**, GUID `a29e7641-de04-47e3-8b2b-f4341aff003b`, 24 controls |
+| 4 | UVC VideoStreaming, EP 0x85 bulk | The only video stream |
 
-  - Total extracted packet bytes: 98343
-  - Temperature header offset: 0x1d
-  - Thermal payload offset: 0x27
-  - Marker/header bytes: ff 00 ff 00 ff 00 ff 00 ff 00
-  - Thermal shape: 256 x 192
-  - Encoding: little-endian uint16
-  - Unit: Kelvin * 10, converted with C = value / 10 - 273.15
-  - Payload size: 256 * 192 * 2 = 98304 bytes
+The VideoStreaming interface advertises exactly **one format**: frame-based
+**H.264, 640x480**, 25/30 fps (UVC format descriptor subtype 0x10, GUID
+"H264"). There is no YUY2/MJPEG alternative and no second video interface.
 
-  Example decoded values from a real capture:
+## How temperature is transported
 
-  first 8 K10: [3096, 3098, 3096, 3096, 3094, 3096, 3094, 3097]
-  center C: 36.65
-  min C: 35.65 at (4, 111)
-  max C: 37.55 at (238, 175)
-  mean C: 36.52
+Everything arrives on bulk endpoint 0x85 as UVC payloads (2-byte payload
+header `02 8x`, FID toggles per frame, EOF set on every payload):
 
-  What Works Now
-  We added parser/test code that can decode the temperature frame from a USBPcap/Wireshark capture. The app can load/
-  tail a .pcap/.pcapng capture file and use the latest decoded thermal frame for hover temperature in the Live tab.
+- **Video samples** (~25/s, 16–23 KB each): complete Annex-B H.264 access
+  units. Every frame contains SPS+PPS+IDR (all-intra), so decode is
+  stateless.
+- **Temperature frames** (~2/s, exactly 98316 bytes): 2-byte UVC header,
+  10-byte marker `ff 00 ff 00 ff 00 ff 00 ff 00`, then 256x192 uint16
+  little-endian Kelvin*10 (`C = value / 10 - 273.15`), 98304 bytes.
 
-  The hover mapping is:
+The temperature payloads are valid UVC frames, so the Windows UVC driver
+assembles and delivers them as "H.264 samples". Any normal decoding pipeline
+(Media Foundation, OpenCV, Qt Multimedia) feeds them into the H.264 decoder,
+which silently drops them — that is why temperatures never appeared in
+decoded frames.
 
-  - Visible video frame: typically 640 x 480
-  - Thermal frame: 256 x 192
-  - Coordinates are scaled from preview/video space into thermal space.
-  - Hover temperature is read from the latest decoded 256 x 192 temperature frame.
+The TM THOR app (`TM THOR.exe` -> `cmsdk.dll` `CInterfaceVideo` ->
+`ARUVCLib.dll` `ArCamManager`/`VideoCaptureDiy`) takes raw samples via a data
+callback and ships FFmpeg DLLs to decode H.264 itself, which matches this
+design.
 
-  Important Limitation
-  The temperature data has not been found inside the normal decoded camera image returned by OpenCV/Media Foundation. It
-  appears in the USB traffic before or outside the standard decoded video frame path.
+## Solution implemented in Thor Viewer
 
-  On Windows, the Thor camera interface is already owned by the system UVC driver / Media Foundation. A normal app
-  generally cannot also open the same USB interface and read raw transfer packets directly without replacing or
-  bypassing the camera driver.
+Read the **compressed** sample stream instead of decoded frames, then split:
 
-  Standalone Options
-  Practical options identified:
+- packet starts with the ff00 marker -> temperature frame
+- packet starts with an H.264 start code -> video access unit
 
-  - Use USBPcap as a passive capture backend, launched by the app instead of manually using Wireshark.
-  - Investigate whether Thor exposes a separate vendor-specific USB interface carrying temperature data. If yes, direct
-    USB access may be possible.
-  - If the temperature data is only on the same UVC stream/interface, direct USB reads would likely conflict with
-    Windows camera access unless using a custom/lower-level driver approach.
+Components:
 
-  Conclusion
-  We can reliably decode live temperature from USB captures. The remaining engineering question is transport: whether we
-  can access the raw temperature stream without USBPcap. That depends on whether the payload is on a separate interface/
-  endpoint or only embedded in the UVC traffic already claimed by Windows.
+- `src/thor_viewer/backend/thor_stream_demuxer.py` — splits a compressed
+  byte stream (or individual samples) into video/temperature events.
+- `src/thor_viewer/backend/thor_compressed_capture.py` —
+  `ThorCompressedLiveCapture` grabs the compressed sample stream with an
+  ffmpeg dshow subprocess
+  (`-f dshow -vcodec h264 -i video=... -c copy -copyinkf -f h264 pipe:1`),
+  feeds the pipe through the demuxer, decodes video AUs with PyAV's H.264
+  decoder for the live preview, and publishes the latest
+  `LiveTemperatureFrame`. ffmpeg is found via `THOR_FFMPEG`, `PATH`, or the
+  bundled `imageio-ffmpeg` binary.
+- `MainWindow` (Windows): uses the compressed capture for the Live tab
+  (video + temperature from one device handle); falls back to the legacy
+  OpenCV path if it fails. `THOR_DISABLE_COMPRESSED_CAPTURE=1` forces the
+  fallback; `THOR_LIVE_TEMPERATURE_PCAP` still selects the USBPcap-tail
+  mode.
+
+Transport dead ends, for the record:
+
+- PyAV's own dshow input cannot open the device: `avformat_find_stream_info`
+  fails (the `extract_extradata` pass returns AVERROR_INVALIDDATA on a
+  temperature packet) and PyAV treats that as fatal, while the ffmpeg CLI
+  only warns and streams on.
+- OpenCV's MSMF raw mode (`CAP_PROP_FORMAT=-1` open parameter) fails on
+  this device ("can't set property 8"); regular MSMF/OpenCV capture decodes
+  and discards the temperature packets.
+- ffmpeg stream copy without `-copyinkf` writes nothing: the driver never
+  flags samples as keyframes, so the copy path waits forever.
+
+## Validation
+
+Offline, against the full 49 MB `thor_live.pcapng` capture
+(`scripts/extract_thor_stream.py`):
+
+- 2165 bulk payloads -> 161 temperature frames + 2004 video samples,
+  0 unclassified, 0 false markers inside 33 MB of H.264.
+- All 2004 video samples decode to 640x480 BGR via FFmpeg.
+- Temperatures plausible across the capture (centers 29.6–37.2 °C).
+
+Live, on real hardware (2026-06-12, `scripts/probe_live_compressed.py`):
+
+- 275 decoded video frames + 22 temperature frames in 12 s
+  (~25 fps video, ~2 Hz temperature), center ~34.8 °C.
+- The TM THOR app was not running: **the temperature frames flow by
+  default**, no enable command is required.
+- The full GUI path (offscreen `MainWindow`) produced live video and hover
+  temperature through `ThorCompressedLiveCapture`.
+
+Re-run live verification any time (Thor connected, no other app using it):
+
+```bash
+uv run python scripts/probe_live_compressed.py --seconds 10
+```
+
+## Open questions
+
+- The CDC-ACM serial channel protocol (device settings, emissivity, etc.)
+  is unexplored. Note: on some plugs interface 0 enumerates as RNDIS
+  (driver error) instead of CDC-ACM, so the device has multiple gadget
+  configurations.
+- Temperature frame rate may be configurable (TM THOR's `SetTempDataParam`,
+  or the UVC Extension Unit's 24 controls).

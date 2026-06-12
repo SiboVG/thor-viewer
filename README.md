@@ -5,6 +5,9 @@ Thor Viewer is an open-source, cross-platform desktop alternative to Thermal Mas
 ## Features
 
 - Live UVC camera view with snapshot and recording controls
+- Live temperature readout on hover (Windows): decodes the radiometric
+  frames the Thor interleaves into its UVC stream, no driver changes needed
+  (see `live-temp.md` for the protocol notes)
 - Thor SD-card browser with automatic missing-file sync over MTP
 - Radiometric JPEG preview and temperature readout
 - Analysis tab for downloaded IR captures
@@ -29,6 +32,9 @@ Screenshots below use generated demo data.
 - `uv` for dependency management
 - Windows uses the built-in portable-device bridge for SD-card sync
 - macOS/Linux SD-card sync requires MTP command-line tools (`mtp-files`, `mtp-getfile`)
+- Live temperature uses an ffmpeg executable: a system `ffmpeg` on `PATH` is
+  preferred, otherwise the bundled `imageio-ffmpeg` binary is used
+  (set `THOR_FFMPEG` to override)
 
 ## Run
 

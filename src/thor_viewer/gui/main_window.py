@@ -28,11 +28,16 @@ from PySide6.QtWidgets import (
 from thor_viewer.backend.camera import UvcCamera
 from thor_viewer.backend.live_temperature import (
     LiveTemperatureFrame,
+    is_plausible_live_temperature_frame,
     parse_live_temperature_packet,
     preview_to_thermal_xy,
 )
 from thor_viewer.backend.live_temperature_capture import OpenCvLiveTemperatureCapture
 from thor_viewer.backend.recorder import VideoRecorder
+from thor_viewer.backend.thor_compressed_capture import (
+    ThorCompressedLiveCapture,
+    dshow_device_candidates,
+)
 from thor_viewer.backend.usbpcap_temperature_capture import UsbPcapLiveTemperatureCapture
 from thor_viewer.config.settings import (
     CAPTURE_DIR,
@@ -66,9 +71,11 @@ class MainWindow(QWidget):
 
         self.camera: QCamera | None = None
         self.opencv_camera: UvcCamera | None = None
+        self.compressed_camera: ThorCompressedLiveCapture | None = None
         self.live_temperature_capture: (
             OpenCvLiveTemperatureCapture
             | UsbPcapLiveTemperatureCapture
+            | ThorCompressedLiveCapture
             | None
         ) = None
         self.opencv_frame_timer = QTimer(self)
@@ -274,12 +281,15 @@ class MainWindow(QWidget):
         return name_matches or id_matches
 
     @staticmethod
-    def normalized_camera_device_id(device) -> str:
+    def raw_camera_device_id(device) -> str:
         try:
-            raw_id = bytes(device.id()).decode(errors="replace")
+            return bytes(device.id()).decode(errors="replace")
         except Exception:
-            raw_id = str(device.id())
+            return str(device.id())
 
+    @staticmethod
+    def normalized_camera_device_id(device) -> str:
+        raw_id = MainWindow.raw_camera_device_id(device)
         return re.sub(r"[^a-z0-9]", "", raw_id.casefold().replace("0x", ""))
 
     @staticmethod
@@ -344,7 +354,7 @@ class MainWindow(QWidget):
         self.latest_live_temperature_frame = None
 
         capture = getattr(self, "live_temperature_capture", None)
-        if capture is not None:
+        if capture is not None and capture is not getattr(self, "compressed_camera", None):
             capture.close()
 
         self.live_temperature_capture = UsbPcapLiveTemperatureCapture(path)
@@ -448,8 +458,7 @@ class MainWindow(QWidget):
 
     @staticmethod
     def is_plausible_live_temperature_frame(frame: LiveTemperatureFrame) -> bool:
-        valid = frame.valid_temperature_values()
-        return valid.size >= int(frame.k10.size * 0.8)
+        return is_plausible_live_temperature_frame(frame)
 
     def on_live_mouse_move(self, event) -> None:
         preview_xy = self.live_preview_xy_from_label_position(event.position())
@@ -590,21 +599,12 @@ class MainWindow(QWidget):
             return
 
         if self.should_use_opencv_live_camera():
-            try:
-                camera_index = self.camera_index_for_device(selected_device)
-                opencv_camera = UvcCamera(camera_index, WIDTH, HEIGHT, FPS)
-                opencv_camera.open()
-            except Exception as exc:
-                self.on_camera_error(str(exc))
-                return
+            if self.should_use_compressed_live_capture():
+                self.start_compressed_camera(selected_device)
+            else:
+                if not self.start_opencv_camera(selected_device):
+                    return
 
-            self.opencv_camera = opencv_camera
-            self.live_temperature_capture = self.create_live_temperature_capture(
-                camera_index,
-                len(QMediaDevices.videoInputs()),
-            )
-            if self.live_temperature_capture is not None:
-                self.live_temperature_capture.open()
             self.last_opencv_sequence = 0
             self.opencv_frame_timer.start(max(1, round(1000 / FPS)))
             self.last_frame_sequence = 0
@@ -633,7 +633,76 @@ class MainWindow(QWidget):
         else:
             self.on_camera_error(str(error))
 
+    def start_compressed_camera(self, selected_device) -> None:
+        raw_id = self.raw_camera_device_id(selected_device)
+        candidates = dshow_device_candidates(selected_device.description(), raw_id)
+        compressed_camera = ThorCompressedLiveCapture(candidates, WIDTH, HEIGHT, FPS)
+        compressed_camera.open()
+        self.compressed_camera = compressed_camera
+        self.live_temperature_capture = compressed_camera
+
+    def start_opencv_camera(self, selected_device) -> bool:
+        try:
+            camera_index = self.camera_index_for_device(selected_device)
+            opencv_camera = UvcCamera(camera_index, WIDTH, HEIGHT, FPS)
+            opencv_camera.open()
+        except Exception as exc:
+            self.on_camera_error(str(exc))
+            return False
+
+        self.opencv_camera = opencv_camera
+        self.live_temperature_capture = self.create_live_temperature_capture(
+            camera_index,
+            len(QMediaDevices.videoInputs()),
+        )
+        if self.live_temperature_capture is not None:
+            self.live_temperature_capture.open()
+        return True
+
+    def fall_back_from_compressed_capture(self, error_message: str) -> None:
+        compressed_camera = self.compressed_camera
+        self.compressed_camera = None
+        if self.live_temperature_capture is compressed_camera:
+            self.live_temperature_capture = None
+        if compressed_camera is not None:
+            compressed_camera.close()
+
+        print(
+            "Compressed live capture unavailable, falling back to OpenCV: "
+            f"{error_message}"
+        )
+
+        selected_device = self.selected_camera_device()
+        if selected_device is None:
+            self.on_camera_error(error_message)
+            return
+
+        if not self.start_opencv_camera(selected_device):
+            return
+
+        self.last_opencv_sequence = 0
+
     def poll_opencv_camera(self) -> None:
+        compressed_camera = self.compressed_camera
+        if compressed_camera is not None:
+            error_message = compressed_camera.error_message
+            if error_message is not None:
+                self.fall_back_from_compressed_capture(error_message)
+                return
+
+            latest = compressed_camera.read_latest()
+            self.update_live_temperature_from_capture()
+            if latest is None:
+                return
+
+            sequence, frame = latest
+            if sequence == self.last_opencv_sequence:
+                return
+
+            self.last_opencv_sequence = sequence
+            self.handle_camera_frame(frame)
+            return
+
         opencv_camera = self.opencv_camera
         if opencv_camera is None:
             return
@@ -679,10 +748,20 @@ class MainWindow(QWidget):
         return (
             getattr(self, "camera", None) is not None
             or getattr(self, "opencv_camera", None) is not None
+            or getattr(self, "compressed_camera", None) is not None
         )
 
     def should_use_opencv_live_camera(self) -> bool:
         return platform.system() == "Windows"
+
+    def should_use_compressed_live_capture(self) -> bool:
+        if os.environ.get("THOR_DISABLE_COMPRESSED_CAPTURE") == "1":
+            return False
+
+        if self.live_temperature_pcap_path() is not None:
+            return False
+
+        return True
 
     def should_probe_opencv_live_temperature(self) -> bool:
         return os.environ.get("THOR_PROBE_LIVE_TEMPERATURE") == "1"
@@ -717,6 +796,12 @@ class MainWindow(QWidget):
         capture = getattr(self, "live_temperature_capture", None)
         if capture is None:
             return "Hover live image for temperature"
+
+        temperature_count = getattr(capture, "temperature_frame_count", None)
+        if temperature_count is not None:
+            if temperature_count > 0:
+                return "Live temperature ready; hover live image"
+            return "Waiting for temperature frames from camera"
 
         status = getattr(capture, "status", None)
         if status is None:
@@ -779,11 +864,15 @@ class MainWindow(QWidget):
 
         opencv_camera = getattr(self, "opencv_camera", None)
         self.opencv_camera = None
+        compressed_camera = getattr(self, "compressed_camera", None)
+        self.compressed_camera = None
         self.last_opencv_sequence = 0
         if hasattr(self, "opencv_frame_timer"):
             self.opencv_frame_timer.stop()
         if opencv_camera is not None:
             opencv_camera.close()
+        if compressed_camera is not None:
+            compressed_camera.close()
 
         live_temperature_capture = getattr(self, "live_temperature_capture", None)
         self.live_temperature_capture = None
