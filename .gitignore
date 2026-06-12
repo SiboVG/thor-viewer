@@ -26,3 +26,6 @@ failed_downloads.txt
 .idea/
 .vscode/
 .DS_Store
+
+# Resources
+resources/
