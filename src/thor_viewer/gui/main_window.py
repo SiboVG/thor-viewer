@@ -26,6 +26,8 @@ from PySide6.QtWidgets import (
 )
 
 from thor_camera_driver import (
+    LIVE_THERMAL_HEIGHT,
+    LIVE_THERMAL_WIDTH,
     THOR_CAMERA_TERMS,
     THOR_CAMERA_USB_SIGNATURES,
     LiveTemperatureFrame,
@@ -47,7 +49,13 @@ from thor_viewer.config.settings import (
     RECORDING_DIR,
     WIDTH,
 )
-from thor_viewer.processing.overlays import draw_crosshair, draw_recording_dot
+from thor_viewer.processing.overlays import (
+    draw_center_temperature_label,
+    draw_crosshair,
+    draw_recording_dot,
+    draw_temperature_gradient_bar,
+    draw_temperature_point_marker,
+)
 from thor_viewer.gui.storage_browser import StorageBrowser
 from thor_viewer.gui.radiometric_image_viewer import RadiometricImageViewer
 from thor_viewer.gui.icons import app_icon, set_button_icon
@@ -229,11 +237,69 @@ class MainWindow(QWidget):
             self.dark_frame_count = 0
 
         display = draw_crosshair(frame.copy(), copy=False)
+        self.draw_live_temperature_overlays(display)
 
         if self.recorder.is_recording:
             display = draw_recording_dot(display, copy=False)
 
         self.show_frame(display)
+
+    def draw_live_temperature_overlays(self, display) -> None:
+        temperature_frame = self.latest_live_temperature_frame
+        if temperature_frame is None:
+            return
+
+        min_celsius = temperature_frame.min_temperature()
+        max_celsius = temperature_frame.max_temperature()
+        if min_celsius is None or max_celsius is None:
+            return
+
+        height, width = display.shape[:2]
+
+        draw_temperature_gradient_bar(display, min_celsius, max_celsius, copy=False)
+
+        center_celsius = temperature_frame.temperature_at_thermal_xy(
+            LIVE_THERMAL_WIDTH // 2,
+            LIVE_THERMAL_HEIGHT // 2,
+        )
+        if center_celsius is not None:
+            draw_center_temperature_label(display, center_celsius, copy=False)
+
+        min_position = temperature_frame.min_temperature_position()
+        if min_position is not None:
+            draw_temperature_point_marker(
+                display,
+                self.thermal_to_preview_xy(min_position, width, height),
+                min_celsius,
+                color=(255, 200, 0),
+                label_prefix="Min",
+                copy=False,
+            )
+
+        max_position = temperature_frame.max_temperature_position()
+        if max_position is not None:
+            draw_temperature_point_marker(
+                display,
+                self.thermal_to_preview_xy(max_position, width, height),
+                max_celsius,
+                color=(0, 0, 255),
+                label_prefix="Max",
+                copy=False,
+            )
+
+    @staticmethod
+    def thermal_to_preview_xy(
+        thermal_xy: tuple[int, int],
+        preview_width: int,
+        preview_height: int,
+    ) -> tuple[int, int]:
+        thermal_x, thermal_y = thermal_xy
+        preview_x = round((thermal_x + 0.5) * preview_width / LIVE_THERMAL_WIDTH)
+        preview_y = round((thermal_y + 0.5) * preview_height / LIVE_THERMAL_HEIGHT)
+        return (
+            max(0, min(preview_x, preview_width - 1)),
+            max(0, min(preview_y, preview_height - 1)),
+        )
 
     def populate_camera_devices(self) -> None:
         selected_device_id = self.selected_camera_device_id()
