@@ -481,16 +481,33 @@ wheels = [
 ]
 
 [[package]]
-name = "thor-viewer"
+name = "thor-camera-driver"
 version = "0.1.0"
-source = { editable = "." }
+source = { editable = "../thor-camera-driver" }
 dependencies = [
     { name = "av" },
     { name = "imageio-ffmpeg" },
     { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "av" },
+    { name = "imageio-ffmpeg" },
+    { name = "numpy" },
+]
+
+[[package]]
+name = "thor-viewer"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "opencv-python" },
     { name = "pyside6" },
+    { name = "thor-camera-driver" },
 ]
 
 [package.dev-dependencies]
@@ -501,11 +518,10 @@ build = [
 
 [package.metadata]
 requires-dist = [
-    { name = "av" },
-    { name = "imageio-ffmpeg" },
     { name = "numpy" },
     { name = "opencv-python" },
     { name = "pyside6" },
+    { name = "thor-camera-driver", editable = "../thor-camera-driver" },
 ]
 
 [package.metadata.requires-dev]

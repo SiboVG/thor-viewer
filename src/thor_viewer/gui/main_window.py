@@ -25,20 +25,21 @@ from PySide6.QtWidgets import (
     QTabWidget,
 )
 
-from thor_viewer.backend.camera import UvcCamera
-from thor_viewer.backend.live_temperature import (
+from thor_camera_driver import (
+    THOR_CAMERA_TERMS,
+    THOR_CAMERA_USB_SIGNATURES,
     LiveTemperatureFrame,
+    ThorCompressedLiveCapture,
+    UsbPcapLiveTemperatureCapture,
+    dshow_device_candidates,
     is_plausible_live_temperature_frame,
     parse_live_temperature_packet,
     preview_to_thermal_xy,
 )
+
+from thor_viewer.backend.camera import UvcCamera
 from thor_viewer.backend.live_temperature_capture import OpenCvLiveTemperatureCapture
 from thor_viewer.backend.recorder import VideoRecorder
-from thor_viewer.backend.thor_compressed_capture import (
-    ThorCompressedLiveCapture,
-    dshow_device_candidates,
-)
-from thor_viewer.backend.usbpcap_temperature_capture import UsbPcapLiveTemperatureCapture
 from thor_viewer.config.settings import (
     CAPTURE_DIR,
     FPS,
@@ -50,13 +51,6 @@ from thor_viewer.processing.overlays import draw_crosshair, draw_recording_dot
 from thor_viewer.gui.storage_browser import StorageBrowser
 from thor_viewer.gui.radiometric_image_viewer import RadiometricImageViewer
 from thor_viewer.gui.icons import app_icon, set_button_icon
-
-
-THOR_CAMERA_TERMS = ("thermalmaster", "thermal master", "thor", "thermal")
-THOR_CAMERA_USB_SIGNATURES = (
-    "1d6b1102",  # RAYSENSE Thor reports as generic "UVC Camera 0" on macOS.
-    "vid1d6bpid1102",  # Windows Qt device id: usb#vid_1d6b&pid_1102...
-)
 
 
 class MainWindow(QWidget):

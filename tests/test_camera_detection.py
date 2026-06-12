@@ -5,7 +5,7 @@ from unittest.mock import patch
 import numpy as np
 
 from thor_viewer.gui.main_window import MainWindow
-from thor_viewer.backend.usbpcap_temperature_capture import UsbPcapLiveTemperatureCapture
+from thor_camera_driver import UsbPcapLiveTemperatureCapture
 
 
 class FakeCameraDevice:

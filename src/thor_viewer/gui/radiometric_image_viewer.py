@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from thor_viewer.backend.radiometric_jpeg import load_radiometric_jpeg
+from thor_camera_driver import load_radiometric_jpeg
 from thor_viewer.gui.icons import set_button_icon
 
 

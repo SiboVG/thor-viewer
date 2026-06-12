@@ -10,7 +10,7 @@ from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication, QLabel
 
-from thor_viewer.backend.live_temperature import (
+from thor_camera_driver import (
     LIVE_THERMAL_HEIGHT,
     LIVE_THERMAL_WIDTH,
     LiveTemperatureFrame,

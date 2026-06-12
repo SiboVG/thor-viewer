@@ -6,8 +6,9 @@ Thor Viewer is an open-source, cross-platform desktop alternative to Thermal Mas
 
 - Live UVC camera view with snapshot and recording controls
 - Live temperature readout on hover (Windows): decodes the radiometric
-  frames the Thor interleaves into its UVC stream, no driver changes needed
-  (see `live-temp.md` for the protocol notes)
+  frames the Thor interleaves into its UVC stream, powered by
+  [thor-camera-driver](https://github.com/SiboVG/thor-camera-driver)
+  (see its PROTOCOL.md for the reverse-engineered details)
 - Thor SD-card browser with automatic missing-file sync over MTP
 - Radiometric JPEG preview and temperature readout
 - Analysis tab for downloaded IR captures
@@ -35,6 +36,10 @@ Screenshots below use generated demo data.
 - Live temperature uses an ffmpeg executable: a system `ffmpeg` on `PATH` is
   preferred, otherwise the bundled `imageio-ffmpeg` binary is used
   (set `THOR_FFMPEG` to override)
+- The Thor protocol code lives in
+  [thor-camera-driver](https://github.com/SiboVG/thor-camera-driver); until
+  it is on PyPI, clone that repo next to this one (`../thor-camera-driver`)
+  so the local path dependency resolves
 
 ## Run
 

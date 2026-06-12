@@ -5,7 +5,7 @@ from threading import Event, Lock, Thread
 
 import cv2
 
-from thor_viewer.backend.live_temperature import (
+from thor_camera_driver import (
     LiveTemperatureFrame,
     parse_live_temperature_packet,
 )

@@ -7,12 +7,16 @@ license = "MIT"
 license-files = ["LICENSE", "THIRD_PARTY_NOTICES.md"]
 requires-python = ">=3.10"
 dependencies = [
-    "av",
-    "imageio-ffmpeg",
     "numpy",
     "opencv-python",
     "pyside6",
+    "thor-camera-driver",
 ]
+
+[tool.uv.sources]
+# Local checkout of https://github.com/SiboVG/thor-camera-driver; clone it
+# next to this repo (or point this at PyPI once published).
+thor-camera-driver = { path = "../thor-camera-driver", editable = true }
 
 [dependency-groups]
 build = [
