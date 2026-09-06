@@ -16,15 +16,10 @@ Thor Viewer is an open-source, cross-platform desktop alternative to Thermal Mas
 
 ## Screenshots
 
-Screenshots below use generated demo data.
+Actual macOS application capture with a connected ThermalMaster Thor pointed at a laptop.
+The live image and temperature overlays come from the camera via the native DriverKit transport.
 
-![Live view](docs/screenshots/live-view.png)
-
-![Storage browser](docs/screenshots/storage.png)
-
-![Analysis overlay mode](docs/screenshots/analysis.png)
-
-![Analysis split view](docs/screenshots/analysis-split-view.png)
+![Thor Viewer displaying a real laptop thermal image with live temperature measurements](docs/screenshots/live-view.png)
 
 ## Requirements
 
