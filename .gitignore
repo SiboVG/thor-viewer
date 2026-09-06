@@ -13,6 +13,7 @@ htmlcov/
 
 # Virtual environments
 .venv/
+.venv-python310-backup/
 .uv-cache/
 
 # Project-specific files

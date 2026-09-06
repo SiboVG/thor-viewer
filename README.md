@@ -31,12 +31,10 @@ The live image and temperature overlays come from the camera via the native Driv
 - Live temperature on Windows/Linux uses an ffmpeg executable: a system
   `ffmpeg` on `PATH` is preferred, otherwise the bundled `imageio-ffmpeg`
   binary is used (set `THOR_FFMPEG` to override)
-- Live temperature on macOS reads the camera over raw USB (libusb via
-  Homebrew: `brew install libusb`). Taking over the camera needs root, so
-  the viewer shows the standard macOS admin-password prompt once when you
-  connect; you do not need to launch it with `sudo`. Decline the prompt and
-  it falls back to video-only. The camera is handed back to macOS when you
-  disconnect or close the app.
+- Live temperature on macOS automatically uses the installed Thor DriverKit
+  extension. Its one-time installation and approval are documented in the
+  [native driver guide](https://github.com/SiboVG/thor-camera-driver/tree/master/native/macos).
+  Normal capture does not use `sudo`, AppleScript, or an administrator helper.
 - The Thor protocol code lives in
   [thor-camera-driver](https://github.com/SiboVG/thor-camera-driver); until
   it is on PyPI, clone that repo next to this one (`../thor-camera-driver`)
@@ -102,14 +100,15 @@ MIT
 
 ## Native macOS capture without a root helper
 
-The [DriverKit prototype](https://github.com/SiboVG/thor-camera-driver/tree/master/native/macos)
+The [DriverKit implementation](https://github.com/SiboVG/thor-camera-driver/tree/master/native/macos)
 provides verified live video and temperatures without sudo or AppleScript capture
-helpers. Build/install and approve its signed driver, reconnect the Thor, then
-run from this repository:
+helpers. Build/install and approve its signed driver, reconnect the Thor, then use
+the regular command:
 
 ```sh
-.venv/bin/python ../thor-camera-driver/native/macos/run_viewer.py
+uv run thor-viewer
 ```
 
-This launcher selects the native transport. The driver owns the whole camera
-while enabled, so webcam and SD-card access require removing it and reconnecting.
+Thor Viewer detects the active native service and selects it automatically. The
+driver owns the whole camera while enabled, so webcam and SD-card access require
+removing it and reconnecting.

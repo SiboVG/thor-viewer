@@ -32,10 +32,12 @@ from thor_camera_driver import (
     THOR_CAMERA_USB_SIGNATURES,
     LiveTemperatureFrame,
     ThorCompressedLiveCapture,
+    ThorDriverKitLiveCapture,
     ThorUsbLiveCapture,
     UsbPcapLiveTemperatureCapture,
     dshow_device_candidates,
     find_thor_v4l2_candidates,
+    has_thor_driverkit_service,
     is_plausible_live_temperature_frame,
     parse_live_temperature_packet,
     preview_to_thermal_xy,
@@ -63,6 +65,22 @@ from thor_viewer.gui.radiometric_image_viewer import RadiometricImageViewer
 from thor_viewer.gui.icons import app_icon, set_button_icon
 
 
+class DriverKitThorDevice:
+    """Camera-list entry for a Thor owned by the native macOS driver."""
+
+    def description(self) -> str:
+        return "ThermalMaster Thor — DriverKit"
+
+    def id(self) -> bytes:
+        return b"driverkit-thor-1d6b-1102"
+
+
+def additional_camera_devices() -> list[DriverKitThorDevice]:
+    if platform.system() == "Darwin" and has_thor_driverkit_service():
+        return [DriverKitThorDevice()]
+    return []
+
+
 class MainWindow(QWidget):
     def __init__(self) -> None:
         super().__init__()
@@ -76,12 +94,16 @@ class MainWindow(QWidget):
         self.camera: QCamera | None = None
         self.opencv_camera: UvcCamera | None = None
         self.compressed_camera: (
-            ThorCompressedLiveCapture | ThorUsbLiveCapture | None
+            ThorCompressedLiveCapture
+            | ThorDriverKitLiveCapture
+            | ThorUsbLiveCapture
+            | None
         ) = None
         self.live_temperature_capture: (
             OpenCvLiveTemperatureCapture
             | UsbPcapLiveTemperatureCapture
             | ThorCompressedLiveCapture
+            | ThorDriverKitLiveCapture
             | ThorUsbLiveCapture
             | None
         ) = None
@@ -312,7 +334,7 @@ class MainWindow(QWidget):
         self.device_combo.blockSignals(True)
         self.device_combo.clear()
 
-        for device in QMediaDevices.videoInputs():
+        for device in self.available_camera_devices():
             if self.is_thor_camera_device(device):
                 self.device_combo.addItem(
                     self.camera_device_label(device),
@@ -328,6 +350,10 @@ class MainWindow(QWidget):
 
         self.device_combo.blockSignals(False)
         self.update_storage_device_state()
+
+    @staticmethod
+    def available_camera_devices() -> list:
+        return [*QMediaDevices.videoInputs(), *additional_camera_devices()]
 
     def update_storage_device_state(self) -> None:
         if hasattr(self, "storage_browser"):
@@ -713,8 +739,10 @@ class MainWindow(QWidget):
 
     def create_compressed_camera(
         self, selected_device
-    ) -> ThorCompressedLiveCapture | ThorUsbLiveCapture:
+    ) -> ThorCompressedLiveCapture | ThorDriverKitLiveCapture | ThorUsbLiveCapture:
         system = platform.system()
+        if isinstance(selected_device, DriverKitThorDevice):
+            return ThorDriverKitLiveCapture(WIDTH, HEIGHT, FPS)
         if system == "Darwin":
             # No macOS capture API passes the compressed UVC samples
             # through, so read the camera over raw USB instead.

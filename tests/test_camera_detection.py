@@ -57,6 +57,45 @@ class CameraDetectionTest(unittest.TestCase):
         self.assertTrue(MainWindow.is_thor_camera_device(device))
         self.assertEqual(MainWindow.camera_device_label(device), "Thor (UVC Camera 0)")
 
+    def test_available_devices_include_native_driverkit_camera(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with (
+            patch(
+                "thor_viewer.gui.main_window.QMediaDevices.videoInputs",
+                return_value=[],
+            ),
+            patch(
+                "thor_viewer.gui.main_window.has_thor_driverkit_service",
+                return_value=True,
+                create=True,
+            ),
+            patch("thor_viewer.gui.main_window.platform.system", return_value="Darwin"),
+        ):
+            devices = window.available_camera_devices()
+
+        self.assertEqual(len(devices), 1)
+        self.assertEqual(devices[0].description(), "ThermalMaster Thor — DriverKit")
+
+    def test_native_driverkit_device_uses_native_capture(self) -> None:
+        device_type = getattr(
+            __import__(
+                "thor_viewer.gui.main_window",
+                fromlist=["DriverKitThorDevice"],
+            ),
+            "DriverKitThorDevice",
+            None,
+        )
+        self.assertIsNotNone(
+            device_type,
+            "viewer has no built-in DriverKit device type",
+        )
+        window = MainWindow.__new__(MainWindow)
+
+        capture = window.create_compressed_camera(device_type())
+
+        self.assertEqual(type(capture).__name__, "ThorDriverKitLiveCapture")
+
     def test_black_frame_detection(self) -> None:
         black = np.zeros((8, 8, 3), dtype=np.uint8)
         visible = np.full((8, 8, 3), 32, dtype=np.uint8)
