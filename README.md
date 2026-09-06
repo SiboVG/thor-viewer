@@ -5,9 +5,9 @@ Thor Viewer is an open-source, cross-platform desktop alternative to Thermal Mas
 ## Features
 
 - Live UVC camera view with snapshot and recording controls
-- Live temperature readout on hover (Windows): decodes the radiometric
-  frames the Thor interleaves into its UVC stream, powered by
-  [thor-camera-driver](https://github.com/SiboVG/thor-camera-driver)
+- Live temperature readout on hover (Windows, Linux, and macOS): decodes
+  the radiometric frames the Thor interleaves into its UVC stream, powered
+  by [thor-camera-driver](https://github.com/SiboVG/thor-camera-driver)
   (see its PROTOCOL.md for the reverse-engineered details)
 - Thor SD-card browser with automatic missing-file sync over MTP
 - Radiometric JPEG preview and temperature readout
@@ -33,9 +33,15 @@ Screenshots below use generated demo data.
 - `uv` for dependency management
 - Windows uses the built-in portable-device bridge for SD-card sync
 - macOS/Linux SD-card sync requires MTP command-line tools (`mtp-files`, `mtp-getfile`)
-- Live temperature uses an ffmpeg executable: a system `ffmpeg` on `PATH` is
-  preferred, otherwise the bundled `imageio-ffmpeg` binary is used
-  (set `THOR_FFMPEG` to override)
+- Live temperature on Windows/Linux uses an ffmpeg executable: a system
+  `ffmpeg` on `PATH` is preferred, otherwise the bundled `imageio-ffmpeg`
+  binary is used (set `THOR_FFMPEG` to override)
+- Live temperature on macOS reads the camera over raw USB (libusb via
+  Homebrew: `brew install libusb`). Taking over the camera needs root, so
+  the viewer shows the standard macOS admin-password prompt once when you
+  connect; you do not need to launch it with `sudo`. Decline the prompt and
+  it falls back to video-only. The camera is handed back to macOS when you
+  disconnect or close the app.
 - The Thor protocol code lives in
   [thor-camera-driver](https://github.com/SiboVG/thor-camera-driver); until
   it is on PyPI, clone that repo next to this one (`../thor-camera-driver`)
@@ -98,3 +104,17 @@ This project is early-stage and reverse-engineered from observed Thor camera fil
 ## License
 
 MIT
+
+## Native macOS capture without a root helper
+
+The [DriverKit prototype](https://github.com/SiboVG/thor-camera-driver/tree/master/native/macos)
+provides verified live video and temperatures without sudo or AppleScript capture
+helpers. Build/install and approve its signed driver, reconnect the Thor, then
+run from this repository:
+
+```sh
+.venv/bin/python ../thor-camera-driver/native/macos/run_viewer.py
+```
+
+This launcher selects the native transport. The driver owns the whole camera
+while enabled, so webcam and SD-card access require removing it and reconnecting.

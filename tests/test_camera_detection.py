@@ -5,7 +5,11 @@ from unittest.mock import patch
 import numpy as np
 
 from thor_viewer.gui.main_window import MainWindow
-from thor_camera_driver import UsbPcapLiveTemperatureCapture
+from thor_camera_driver import (
+    ThorCompressedLiveCapture,
+    ThorUsbLiveCapture,
+    UsbPcapLiveTemperatureCapture,
+)
 
 
 class FakeCameraDevice:
@@ -66,11 +70,55 @@ class CameraDetectionTest(unittest.TestCase):
         with patch("thor_viewer.gui.main_window.platform.system", return_value="Windows"):
             self.assertTrue(window.should_use_opencv_live_camera())
 
-    def test_non_windows_live_camera_uses_qt_backend(self) -> None:
+    def test_macos_and_linux_live_camera_use_opencv_backend(self) -> None:
         window = MainWindow.__new__(MainWindow)
 
-        with patch("thor_viewer.gui.main_window.platform.system", return_value="Darwin"):
+        for system in ("Darwin", "Linux"):
+            with patch(
+                "thor_viewer.gui.main_window.platform.system", return_value=system
+            ):
+                self.assertTrue(window.should_use_opencv_live_camera())
+
+    def test_other_platforms_fall_back_to_qt_backend(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+
+        with patch("thor_viewer.gui.main_window.platform.system", return_value="FreeBSD"):
             self.assertFalse(window.should_use_opencv_live_camera())
+
+    def test_macos_compressed_camera_reads_raw_usb(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        device = FakeCameraDevice("UVC Camera 0", b"0x1000001d6b1102")
+
+        with patch("thor_viewer.gui.main_window.platform.system", return_value="Darwin"):
+            capture = window.create_compressed_camera(device)
+
+        self.assertIsInstance(capture, ThorUsbLiveCapture)
+
+    def test_linux_compressed_camera_uses_v4l2_nodes(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        device = FakeCameraDevice("UVC Camera 0", b"/dev/video2")
+
+        with (
+            patch("thor_viewer.gui.main_window.platform.system", return_value="Linux"),
+            patch(
+                "thor_viewer.gui.main_window.find_thor_v4l2_candidates",
+                return_value=["/dev/video2", "/dev/video3"],
+            ),
+        ):
+            capture = window.create_compressed_camera(device)
+
+        self.assertIsInstance(capture, ThorCompressedLiveCapture)
+        self.assertEqual(capture.device_candidates, ["/dev/video2", "/dev/video3"])
+
+    def test_windows_compressed_camera_uses_dshow_names(self) -> None:
+        window = MainWindow.__new__(MainWindow)
+        device = FakeCameraDevice("UVC Camera 0", b"opaque-id")
+
+        with patch("thor_viewer.gui.main_window.platform.system", return_value="Windows"):
+            capture = window.create_compressed_camera(device)
+
+        self.assertIsInstance(capture, ThorCompressedLiveCapture)
+        self.assertEqual(capture.device_candidates, ["video=UVC Camera 0"])
 
     def test_live_temperature_probe_is_opt_in(self) -> None:
         window = MainWindow.__new__(MainWindow)

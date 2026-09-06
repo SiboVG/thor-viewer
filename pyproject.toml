@@ -11,6 +11,8 @@ dependencies = [
     "opencv-python",
     "pyside6",
     "thor-camera-driver",
+    # Live temperatures on macOS read the camera over raw USB (pyusb)
+    "thor-camera-driver[usb] ; sys_platform == 'darwin'",
 ]
 
 [tool.uv.sources]

@@ -32,8 +32,10 @@ from thor_camera_driver import (
     THOR_CAMERA_USB_SIGNATURES,
     LiveTemperatureFrame,
     ThorCompressedLiveCapture,
+    ThorUsbLiveCapture,
     UsbPcapLiveTemperatureCapture,
     dshow_device_candidates,
+    find_thor_v4l2_candidates,
     is_plausible_live_temperature_frame,
     parse_live_temperature_packet,
     preview_to_thermal_xy,
@@ -73,11 +75,14 @@ class MainWindow(QWidget):
 
         self.camera: QCamera | None = None
         self.opencv_camera: UvcCamera | None = None
-        self.compressed_camera: ThorCompressedLiveCapture | None = None
+        self.compressed_camera: (
+            ThorCompressedLiveCapture | ThorUsbLiveCapture | None
+        ) = None
         self.live_temperature_capture: (
             OpenCvLiveTemperatureCapture
             | UsbPcapLiveTemperatureCapture
             | ThorCompressedLiveCapture
+            | ThorUsbLiveCapture
             | None
         ) = None
         self.opencv_frame_timer = QTimer(self)
@@ -379,10 +384,17 @@ class MainWindow(QWidget):
 
         self.populate_camera_devices()
         refreshed_device_id = self.selected_camera_device_id()
+        # While the raw USB capture holds the camera, the OS camera stack no
+        # longer lists it, so its absence from Qt does not mean unplugged.
+        compressed_camera = getattr(self, "compressed_camera", None)
+        raw_usb_streaming = (
+            isinstance(compressed_camera, ThorUsbLiveCapture)
+            and compressed_camera.error_message is None
+        )
         still_connected = (
             self.has_active_camera()
             and connected_device_id is not None
-            and connected_device_id == refreshed_device_id
+            and (connected_device_id == refreshed_device_id or raw_usb_streaming)
         )
         if still_connected:
             self.set_camera_connected_ui(True, self.connected_camera_status())
@@ -694,12 +706,33 @@ class MainWindow(QWidget):
             self.on_camera_error(str(error))
 
     def start_compressed_camera(self, selected_device) -> None:
-        raw_id = self.raw_camera_device_id(selected_device)
-        candidates = dshow_device_candidates(selected_device.description(), raw_id)
-        compressed_camera = ThorCompressedLiveCapture(candidates, WIDTH, HEIGHT, FPS)
+        compressed_camera = self.create_compressed_camera(selected_device)
         compressed_camera.open()
         self.compressed_camera = compressed_camera
         self.live_temperature_capture = compressed_camera
+
+    def create_compressed_camera(
+        self, selected_device
+    ) -> ThorCompressedLiveCapture | ThorUsbLiveCapture:
+        system = platform.system()
+        if system == "Darwin":
+            # No macOS capture API passes the compressed UVC samples
+            # through, so read the camera over raw USB instead.
+            return ThorUsbLiveCapture(WIDTH, HEIGHT, FPS)
+
+        raw_id = self.raw_camera_device_id(selected_device)
+        if system == "Windows":
+            candidates = dshow_device_candidates(
+                selected_device.description(), raw_id
+            )
+        else:
+            candidates = list(
+                dict.fromkeys(
+                    ([raw_id] if raw_id.startswith("/dev/video") else [])
+                    + find_thor_v4l2_candidates()
+                )
+            )
+        return ThorCompressedLiveCapture(candidates, WIDTH, HEIGHT, FPS)
 
     def start_opencv_camera(self, selected_device) -> bool:
         try:
@@ -812,7 +845,10 @@ class MainWindow(QWidget):
         )
 
     def should_use_opencv_live_camera(self) -> bool:
-        return platform.system() == "Windows"
+        # All three platforms use our own capture pipeline (compressed
+        # ffmpeg stream or raw USB) with an OpenCV fallback; QCamera remains
+        # only for platforms without any live-temperature transport.
+        return platform.system() in ("Windows", "Linux", "Darwin")
 
     def should_use_compressed_live_capture(self) -> bool:
         if os.environ.get("THOR_DISABLE_COMPRESSED_CAPTURE") == "1":
